@@ -1,0 +1,449 @@
+/**
+ * @fileoverview Guardian Open Platform API service — HTTP client, HTML stripping, word-count
+ * truncation, and response normalization for all three tools.
+ * @module services/guardian/guardian-service
+ */
+
+import type { Context } from '@cyanheads/mcp-ts-core';
+import { JsonRpcErrorCode, McpError, serviceUnavailable } from '@cyanheads/mcp-ts-core/errors';
+import { fetchWithTimeout, requestContextService, withRetry } from '@cyanheads/mcp-ts-core/utils';
+import { getServerConfig } from '@/config/server-config.js';
+import type {
+  NormalizedArticle,
+  NormalizedSearchResult,
+  NormalizedSection,
+  NormalizedSectionsResult,
+  NormalizedTag,
+  NormalizedTagsResult,
+  RawContentItem,
+  RawSearchResponse,
+  RawSectionsResponse,
+  RawSingleContent,
+  RawSingleResponse,
+  RawTag,
+  RawTagsResponse,
+} from './types.js';
+
+const BASE_URL = 'https://content.guardianapis.com';
+const TIMEOUT_MS = 10_000;
+const WORD_LIMIT = 2_000;
+
+/** Shared show-fields param for all article-returning endpoints. */
+const SHOW_FIELDS = 'body,headline,byline,thumbnail,wordcount,standfirst';
+
+// ---------------------------------------------------------------------------
+// HTML stripping
+// ---------------------------------------------------------------------------
+
+/** Strip HTML tags and decode common entities from a string. */
+function stripHtml(html: string): string {
+  return (
+    html
+      // Remove script/style blocks entirely
+      .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, '')
+      // Replace block-level elements with newlines
+      .replace(/<\/(p|div|li|h[1-6]|blockquote|figure|aside|section|article|br)>/gi, '\n')
+      // Replace <br> self-closing
+      .replace(/<br\s*\/?>/gi, '\n')
+      // Strip remaining tags
+      .replace(/<[^>]+>/g, '')
+      // Decode common HTML entities
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&hellip;/g, '…')
+      .replace(/&mdash;/g, '—')
+      .replace(/&ndash;/g, '–')
+      .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+      // Collapse excess whitespace / blank lines
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Body truncation
+// ---------------------------------------------------------------------------
+
+/** Truncate body text at WORD_LIMIT words, appending a note with the article ID. */
+function truncateBody(text: string, articleId: string): { body: string; truncated: boolean } {
+  const words = text.split(/\s+/);
+  if (words.length <= WORD_LIMIT) {
+    return { body: text, truncated: false };
+  }
+  const truncated = words.slice(0, WORD_LIMIT).join(' ');
+  return {
+    body:
+      truncated +
+      `\n\n[Article truncated at 2,000 words. Use guardian_get_article with id "${articleId}" to retrieve the full text.]`,
+    truncated: true,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Normalization helpers
+// ---------------------------------------------------------------------------
+
+function normalizeContributors(tags?: RawTag[]): Array<{ id: string; name: string }> {
+  if (!tags) return [];
+  return tags.filter((t) => t.type === 'contributor').map((t) => ({ id: t.id, name: t.webTitle }));
+}
+
+function normalizeArticle(raw: RawContentItem | RawSingleContent): NormalizedArticle {
+  const fields = raw.fields ?? {};
+
+  const rawHeadline = fields.headline ?? '';
+  const headline = rawHeadline ? stripHtml(rawHeadline) : '';
+
+  const rawStandfirst = fields.standfirst;
+  const standfirst = rawStandfirst ? stripHtml(rawStandfirst) : undefined;
+
+  const rawByline = fields.byline;
+  const byline = rawByline ? stripHtml(rawByline) : undefined;
+
+  const rawBody = fields.body;
+  const strippedBody = rawBody ? stripHtml(rawBody) : undefined;
+
+  const wordCountRaw = fields.wordcount;
+  const word_count = wordCountRaw ? Number.parseInt(wordCountRaw, 10) || undefined : undefined;
+
+  const thumbnail = fields.thumbnail;
+
+  let body: string | undefined;
+  let truncated = false;
+  if (strippedBody) {
+    const result = truncateBody(strippedBody, raw.id);
+    body = result.body;
+    truncated = result.truncated;
+  }
+
+  const contributors = normalizeContributors(raw.tags);
+
+  return {
+    id: raw.id,
+    type: raw.type,
+    section_id: raw.sectionId,
+    section_name: raw.sectionName,
+    published_date: raw.webPublicationDate,
+    headline,
+    ...(standfirst !== undefined && { standfirst }),
+    ...(byline !== undefined && { byline }),
+    web_url: raw.webUrl,
+    ...(thumbnail !== undefined && { thumbnail }),
+    ...(word_count !== undefined && { word_count }),
+    ...(body !== undefined && { body }),
+    truncated,
+    contributors,
+    ...(raw.pillarId !== undefined && { pillar_id: raw.pillarId }),
+    ...(raw.pillarName !== undefined && { pillar_name: raw.pillarName }),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Context helper
+// ---------------------------------------------------------------------------
+
+/** Build a RequestContext from a handler Context for use with fetchWithTimeout/withRetry. */
+function makeReqCtx(operation: string, ctx: Context) {
+  return requestContextService.createRequestContext({
+    operation,
+    parentContext: {
+      requestId: ctx.requestId,
+      traceId: ctx.traceId,
+      tenantId: ctx.tenantId,
+      timestamp: new Date().toISOString(),
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// HTTP helpers
+// ---------------------------------------------------------------------------
+
+/** Build a URL with query params, always injecting api-key and format. */
+function buildUrl(path: string, params: Record<string, string | number | undefined>): string {
+  const url = new URL(`${BASE_URL}${path}`);
+  url.searchParams.set('api-key', getServerConfig().apiKey);
+  url.searchParams.set('format', 'json');
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== '') {
+      url.searchParams.set(key, String(value));
+    }
+  }
+  return url.toString();
+}
+
+/** Detect and throw on HTML error-page responses from the API. */
+function assertNotHtmlPage(text: string): void {
+  if (/^\s*<(!DOCTYPE\s+html|html[\s>])/i.test(text)) {
+    throw serviceUnavailable(
+      'Guardian API returned an HTML page instead of JSON — the service may be temporarily unavailable.',
+    );
+  }
+}
+
+/**
+ * Annotate a caught McpError from fetchWithTimeout with a contract reason so
+ * tool handlers get `data.reason` populated. Only annotates errors that still
+ * lack a reason; already-annotated errors pass through unchanged.
+ */
+function annotateHttpError(err: unknown, opts: { notFoundReason?: string } = {}): never {
+  if (!(err instanceof McpError)) throw err;
+  // Already has a reason — leave it alone
+  if (typeof (err.data as Record<string, unknown> | undefined)?.reason === 'string') throw err;
+
+  const status = (err.data as Record<string, unknown> | undefined)?.statusCode as
+    | number
+    | undefined;
+
+  if (status === 401) {
+    throw new McpError(JsonRpcErrorCode.Unauthorized, err.message, {
+      ...(err.data as object | undefined),
+      reason: 'unauthorized',
+    });
+  }
+  if (status === 404 && opts.notFoundReason) {
+    throw new McpError(JsonRpcErrorCode.NotFound, err.message, {
+      ...(err.data as object | undefined),
+      reason: opts.notFoundReason,
+    });
+  }
+  // All other non-OK statuses map to api_error
+  throw new McpError(err.code, err.message, {
+    ...(err.data as object | undefined),
+    reason: 'api_error',
+  });
+}
+
+// ---------------------------------------------------------------------------
+// GuardianService
+// ---------------------------------------------------------------------------
+
+export class GuardianService {
+  /** Full-text search across the Guardian archive. */
+  async search(
+    params: {
+      query: string;
+      section?: string;
+      tag?: string;
+      contributor?: string;
+      from_date?: string;
+      to_date?: string;
+      order_by?: string;
+      page?: number;
+      page_size?: number;
+    },
+    ctx: Context,
+  ): Promise<NormalizedSearchResult> {
+    // Build tag param: merge tag + contributor (contributor is a tag under profile/ namespace)
+    let tagParam: string | undefined = params.tag;
+    if (params.contributor) {
+      tagParam = tagParam ? `${tagParam},${params.contributor}` : params.contributor;
+    }
+
+    const url = buildUrl('/search', {
+      q: params.query,
+      'show-fields': SHOW_FIELDS,
+      'show-tags': 'contributor',
+      section: params.section,
+      tag: tagParam,
+      'from-date': params.from_date,
+      'to-date': params.to_date,
+      'order-by': params.order_by ?? 'relevance',
+      page: params.page ?? 1,
+      'page-size': params.page_size ?? 10,
+    });
+
+    const reqCtx = makeReqCtx('GuardianService.search', ctx);
+    return withRetry(
+      async () => {
+        const response = await fetchWithTimeout(url, TIMEOUT_MS, reqCtx, { signal: ctx.signal });
+        const text = await response.text();
+        assertNotHtmlPage(text);
+        const data = JSON.parse(text) as RawSearchResponse;
+        const r = data.response;
+
+        return {
+          total: r.total,
+          page: r.currentPage,
+          pages: r.pages,
+          page_size: r.results.length,
+          order_by: r.orderBy ?? params.order_by ?? 'relevance',
+          results: r.results.map(normalizeArticle),
+        };
+      },
+      {
+        operation: 'GuardianService.search',
+        context: reqCtx,
+        baseDelayMs: 500,
+        signal: ctx.signal,
+      },
+    ).catch(annotateHttpError);
+  }
+
+  /** Fetch a single article by its path-slug ID. */
+  async getContent(articleId: string, ctx: Context): Promise<NormalizedArticle> {
+    const url = buildUrl(`/${articleId}`, {
+      'show-fields': SHOW_FIELDS,
+      'show-tags': 'contributor',
+    });
+
+    const reqCtx = makeReqCtx('GuardianService.getContent', ctx);
+    return withRetry(
+      async () => {
+        const response = await fetchWithTimeout(url, TIMEOUT_MS, reqCtx, { signal: ctx.signal });
+        const text = await response.text();
+        assertNotHtmlPage(text);
+        const data = JSON.parse(text) as RawSingleResponse;
+        return normalizeArticle(data.response.content);
+      },
+      {
+        operation: 'GuardianService.getContent',
+        context: reqCtx,
+        baseDelayMs: 500,
+        signal: ctx.signal,
+      },
+    ).catch((err) => annotateHttpError(err, { notFoundReason: 'not_found' }));
+  }
+
+  /** Fetch latest content from a section ID. */
+  async getSectionContent(
+    sectionId: string,
+    pageParams: { page?: number; page_size?: number },
+    ctx: Context,
+  ): Promise<NormalizedSearchResult> {
+    const url = buildUrl(`/${sectionId}`, {
+      'show-fields': SHOW_FIELDS,
+      'show-tags': 'contributor',
+      page: pageParams.page ?? 1,
+      'page-size': pageParams.page_size ?? 10,
+    });
+
+    const reqCtx = makeReqCtx('GuardianService.getSectionContent', ctx);
+    return withRetry(
+      async () => {
+        const response = await fetchWithTimeout(url, TIMEOUT_MS, reqCtx, { signal: ctx.signal });
+        const text = await response.text();
+        assertNotHtmlPage(text);
+        const data = JSON.parse(text) as RawSearchResponse;
+        const r = data.response;
+
+        return {
+          total: r.total,
+          page: r.currentPage,
+          pages: r.pages,
+          page_size: r.results.length,
+          order_by: 'newest', // section endpoint always returns newest first
+          results: r.results.map(normalizeArticle),
+        };
+      },
+      {
+        operation: 'GuardianService.getSectionContent',
+        context: reqCtx,
+        baseDelayMs: 500,
+        signal: ctx.signal,
+      },
+    ).catch(annotateHttpError);
+  }
+
+  /** Fetch all Guardian sections, optionally filtering by query. */
+  async getSections(query: string | undefined, ctx: Context): Promise<NormalizedSectionsResult> {
+    const url = buildUrl('/sections', { q: query });
+
+    const reqCtx = makeReqCtx('GuardianService.getSections', ctx);
+    return withRetry(
+      async () => {
+        const response = await fetchWithTimeout(url, TIMEOUT_MS, reqCtx, { signal: ctx.signal });
+        const text = await response.text();
+        assertNotHtmlPage(text);
+        const data = JSON.parse(text) as RawSectionsResponse;
+        const r = data.response;
+
+        const sections: NormalizedSection[] = r.results.map((s) => ({
+          id: s.id,
+          name: s.webTitle,
+          web_url: s.webUrl,
+        }));
+
+        return { total: r.total, sections };
+      },
+      {
+        operation: 'GuardianService.getSections',
+        context: reqCtx,
+        baseDelayMs: 500,
+        signal: ctx.signal,
+      },
+    ).catch(annotateHttpError);
+  }
+
+  /** Search the Guardian tag taxonomy. */
+  async getTags(
+    params: {
+      query?: string;
+      tag_type?: string;
+      section?: string;
+      page?: number;
+      page_size?: number;
+    },
+    ctx: Context,
+  ): Promise<NormalizedTagsResult> {
+    const url = buildUrl('/tags', {
+      q: params.query,
+      type: params.tag_type,
+      section: params.section,
+      page: params.page ?? 1,
+      'page-size': params.page_size ?? 10,
+    });
+
+    const reqCtx = makeReqCtx('GuardianService.getTags', ctx);
+    return withRetry(
+      async () => {
+        const response = await fetchWithTimeout(url, TIMEOUT_MS, reqCtx, { signal: ctx.signal });
+        const text = await response.text();
+        assertNotHtmlPage(text);
+        const data = JSON.parse(text) as RawTagsResponse;
+        const r = data.response;
+
+        const tags: NormalizedTag[] = r.results.map((t) => ({
+          id: t.id,
+          type: t.type,
+          name: t.webTitle,
+          web_url: t.webUrl,
+        }));
+
+        return {
+          total: r.total,
+          page: r.currentPage,
+          pages: r.pages,
+          tags,
+        };
+      },
+      {
+        operation: 'GuardianService.getTags',
+        context: reqCtx,
+        baseDelayMs: 500,
+        signal: ctx.signal,
+      },
+    ).catch(annotateHttpError);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Init/accessor pattern
+// ---------------------------------------------------------------------------
+
+let _service: GuardianService | undefined;
+
+export function initGuardianService(): void {
+  _service = new GuardianService();
+}
+
+export function getGuardianService(): GuardianService {
+  if (!_service) {
+    throw new Error('GuardianService not initialized — call initGuardianService() in setup()');
+  }
+  return _service;
+}
