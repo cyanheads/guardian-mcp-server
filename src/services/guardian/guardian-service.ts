@@ -185,6 +185,11 @@ function assertNotHtmlPage(text: string): void {
   }
 }
 
+/** Redact the api-key query parameter from URLs in error messages. */
+function redactApiKey(message: string): string {
+  return message.replace(/([?&]api-key=)[^&\s"]+/gi, '$1[REDACTED]');
+}
+
 /**
  * Annotate a caught McpError from fetchWithTimeout with a contract reason so
  * tool handlers get `data.reason` populated. Only annotates errors that still
@@ -199,20 +204,22 @@ function annotateHttpError(err: unknown, opts: { notFoundReason?: string } = {})
     | number
     | undefined;
 
+  const safeMessage = redactApiKey(err.message);
+
   if (status === 401) {
-    throw new McpError(JsonRpcErrorCode.Unauthorized, err.message, {
+    throw new McpError(JsonRpcErrorCode.Unauthorized, safeMessage, {
       ...(err.data as object | undefined),
       reason: 'unauthorized',
     });
   }
   if (status === 404 && opts.notFoundReason) {
-    throw new McpError(JsonRpcErrorCode.NotFound, err.message, {
+    throw new McpError(JsonRpcErrorCode.NotFound, safeMessage, {
       ...(err.data as object | undefined),
       reason: opts.notFoundReason,
     });
   }
   // All other non-OK statuses map to api_error
-  throw new McpError(err.code, err.message, {
+  throw new McpError(err.code, safeMessage, {
     ...(err.data as object | undefined),
     reason: 'api_error',
   });
@@ -346,7 +353,7 @@ export class GuardianService {
         baseDelayMs: 500,
         signal: ctx.signal,
       },
-    ).catch(annotateHttpError);
+    ).catch((err) => annotateHttpError(err, { notFoundReason: 'section_not_found' }));
   }
 
   /** Fetch all Guardian sections, optionally filtering by query. */
@@ -412,6 +419,8 @@ export class GuardianService {
           type: t.type,
           name: t.webTitle,
           web_url: t.webUrl,
+          ...(t.sectionId != null && { section_id: t.sectionId }),
+          ...(t.sectionName != null && { section_name: t.sectionName }),
         }));
 
         return {

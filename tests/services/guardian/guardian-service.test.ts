@@ -273,6 +273,66 @@ describe('GuardianService', () => {
       expect(result.tags[0].name).toBe('Climate change');
       expect(result.tags[0].type).toBe('keyword');
     });
+
+    it('maps sectionId and sectionName from raw tag to section_id and section_name', async () => {
+      const raw = {
+        response: {
+          status: 'ok',
+          total: 1,
+          startIndex: 1,
+          pageSize: 10,
+          currentPage: 1,
+          pages: 1,
+          results: [
+            {
+              id: 'environment/climate-crisis',
+              type: 'keyword',
+              webTitle: 'Climate crisis',
+              webUrl: 'https://www.theguardian.com/environment/climate-crisis',
+              sectionId: 'environment',
+              sectionName: 'Environment',
+            },
+          ],
+        },
+      };
+
+      vi.mocked(fetchWithTimeout).mockResolvedValueOnce(makeResponse(JSON.stringify(raw)));
+      const ctx = createMockContext();
+      const result = await svc.getTags({ query: 'climate' }, ctx);
+
+      expect(result.tags[0].section_id).toBe('environment');
+      expect(result.tags[0].section_name).toBe('Environment');
+    });
+
+    it('omits section_id/section_name when raw tag has null sectionId', async () => {
+      const raw = {
+        response: {
+          status: 'ok',
+          total: 1,
+          startIndex: 1,
+          pageSize: 10,
+          currentPage: 1,
+          pages: 1,
+          results: [
+            {
+              id: 'paid-content/paid-content',
+              type: 'paid-content',
+              webTitle: 'Paid content',
+              webUrl: 'https://www.theguardian.com/paid-content',
+              sectionId: null,
+              sectionName: null,
+            },
+          ],
+        },
+      };
+
+      vi.mocked(fetchWithTimeout).mockResolvedValueOnce(makeResponse(JSON.stringify(raw)));
+      const ctx = createMockContext();
+      const result = await svc.getTags({}, ctx);
+
+      expect(result.tags[0].section_id).toBeUndefined();
+      expect(result.tags[0].section_name).toBeUndefined();
+    });
   });
 
   describe('error annotation', () => {
@@ -348,6 +408,38 @@ describe('GuardianService', () => {
       await expect(svc.search({ query: 'test' }, ctx)).rejects.toMatchObject({
         data: { reason: 'already_set' },
       });
+    });
+
+    it('annotates 404 on getSectionContent with reason="section_not_found"', async () => {
+      vi.mocked(fetchWithTimeout).mockRejectedValueOnce(
+        new McpError(JsonRpcErrorCode.NotFound, 'Fetch failed. Status: 404', {
+          statusCode: 404,
+          statusText: 'Not Found',
+        }),
+      );
+      const ctx = createMockContext();
+
+      await expect(svc.getSectionContent('nonexistent-section', {}, ctx)).rejects.toMatchObject({
+        code: JsonRpcErrorCode.NotFound,
+        data: { reason: 'section_not_found' },
+      });
+    });
+
+    it('redacts api-key from error messages', async () => {
+      vi.mocked(fetchWithTimeout).mockRejectedValueOnce(
+        new McpError(
+          JsonRpcErrorCode.Unauthorized,
+          'Fetch failed for https://content.guardianapis.com/search?api-key=my-secret-key&format=json. Status: 401',
+          { statusCode: 401 },
+        ),
+      );
+      const ctx = createMockContext();
+
+      const error = await svc.search({ query: 'test' }, ctx).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(McpError);
+      const msg = (error as McpError).message;
+      expect(msg).not.toContain('my-secret-key');
+      expect(msg).toContain('[REDACTED]');
     });
   });
 });

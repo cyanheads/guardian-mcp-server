@@ -18,10 +18,12 @@ export interface RawFields {
   wordcount?: string; // API returns as string integer
 }
 
-/** Raw tag object (used for contributors). */
+/** Raw tag object (used for contributors and tag search results). */
 export interface RawTag {
   apiUrl?: string;
   id: string;
+  sectionId?: string | null;
+  sectionName?: string | null;
   type: string;
   webTitle: string;
   webUrl: string;
