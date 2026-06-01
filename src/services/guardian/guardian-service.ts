@@ -95,22 +95,14 @@ function normalizeContributors(tags?: RawTag[]): Array<{ id: string; name: strin
 function normalizeArticle(raw: RawContentItem | RawSingleContent): NormalizedArticle {
   const fields = raw.fields ?? {};
 
-  const rawHeadline = fields.headline ?? '';
-  const headline = rawHeadline ? stripHtml(rawHeadline) : '';
-
-  const rawStandfirst = fields.standfirst;
-  const standfirst = rawStandfirst ? stripHtml(rawStandfirst) : undefined;
-
-  const rawByline = fields.byline;
-  const byline = rawByline ? stripHtml(rawByline) : undefined;
-
-  const rawBody = fields.body;
-  const strippedBody = rawBody ? stripHtml(rawBody) : undefined;
-
-  const wordCountRaw = fields.wordcount;
-  const word_count = wordCountRaw ? Number.parseInt(wordCountRaw, 10) || undefined : undefined;
-
-  const thumbnail = fields.thumbnail;
+  const rawHeadlineStr = fields.headline ?? '';
+  const headline = rawHeadlineStr ? stripHtml(rawHeadlineStr) : '';
+  const standfirst = fields.standfirst ? stripHtml(fields.standfirst) : undefined;
+  const byline = fields.byline ? stripHtml(fields.byline) : undefined;
+  const strippedBody = fields.body ? stripHtml(fields.body) : undefined;
+  const word_count = fields.wordcount
+    ? Number.parseInt(fields.wordcount, 10) || undefined
+    : undefined;
 
   let body: string | undefined;
   let truncated = false;
@@ -119,8 +111,6 @@ function normalizeArticle(raw: RawContentItem | RawSingleContent): NormalizedArt
     body = result.body;
     truncated = result.truncated;
   }
-
-  const contributors = normalizeContributors(raw.tags);
 
   return {
     id: raw.id,
@@ -132,11 +122,11 @@ function normalizeArticle(raw: RawContentItem | RawSingleContent): NormalizedArt
     ...(standfirst !== undefined && { standfirst }),
     ...(byline !== undefined && { byline }),
     web_url: raw.webUrl,
-    ...(thumbnail !== undefined && { thumbnail }),
+    ...(fields.thumbnail !== undefined && { thumbnail: fields.thumbnail }),
     ...(word_count !== undefined && { word_count }),
     ...(body !== undefined && { body }),
     truncated,
-    contributors,
+    contributors: normalizeContributors(raw.tags),
     ...(raw.pillarId !== undefined && { pillar_id: raw.pillarId }),
     ...(raw.pillarName !== undefined && { pillar_name: raw.pillarName }),
   };
@@ -192,19 +182,22 @@ function redactApiKey(message: string): string {
 
 /**
  * Annotate a caught McpError from fetchWithTimeout with a contract reason so
- * tool handlers get `data.reason` populated. Only annotates errors that still
- * lack a reason; already-annotated errors pass through unchanged.
+ * tool handlers get `data.reason` populated. Always redacts the API key from
+ * the message before rethrowing, even when the error already carries a reason.
  */
 function annotateHttpError(err: unknown, opts: { notFoundReason?: string } = {}): never {
   if (!(err instanceof McpError)) throw err;
-  // Already has a reason — leave it alone
-  if (typeof (err.data as Record<string, unknown> | undefined)?.reason === 'string') throw err;
+
+  const safeMessage = redactApiKey(err.message);
+
+  // Already has a reason — rethrow with redacted message only
+  if (typeof (err.data as Record<string, unknown> | undefined)?.reason === 'string') {
+    throw new McpError(err.code, safeMessage, err.data as Record<string, unknown> | undefined);
+  }
 
   const status = (err.data as Record<string, unknown> | undefined)?.statusCode as
     | number
     | undefined;
-
-  const safeMessage = redactApiKey(err.message);
 
   if (status === 401) {
     throw new McpError(JsonRpcErrorCode.Unauthorized, safeMessage, {

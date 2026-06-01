@@ -396,18 +396,22 @@ describe('GuardianService', () => {
       });
     });
 
-    it('passes through errors that already carry a reason', async () => {
+    it('preserves reason and redacts api-key for errors that already carry a reason', async () => {
       vi.mocked(fetchWithTimeout).mockRejectedValueOnce(
-        new McpError(JsonRpcErrorCode.ServiceUnavailable, 'Already annotated', {
-          statusCode: 503,
-          reason: 'already_set',
-        }),
+        new McpError(
+          JsonRpcErrorCode.ServiceUnavailable,
+          'Fetch failed for https://content.guardianapis.com/search?api-key=leaked-key&format=json. Status: 503',
+          { statusCode: 503, reason: 'already_set' },
+        ),
       );
       const ctx = createMockContext();
 
-      await expect(svc.search({ query: 'test' }, ctx)).rejects.toMatchObject({
-        data: { reason: 'already_set' },
-      });
+      const error = await svc.search({ query: 'test' }, ctx).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(McpError);
+      const mcpError = error as McpError;
+      expect(mcpError.data).toMatchObject({ reason: 'already_set' });
+      expect(mcpError.message).not.toContain('leaked-key');
+      expect(mcpError.message).toContain('[REDACTED]');
     });
 
     it('annotates 404 on getSectionContent with reason="section_not_found"', async () => {

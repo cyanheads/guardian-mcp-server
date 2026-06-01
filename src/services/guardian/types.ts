@@ -45,7 +45,7 @@ export interface RawContentItem {
 }
 
 /** Raw single-content response (single-item endpoint returns response.content, not response.results[]). */
-export interface RawSingleContent extends RawContentItem {}
+export type RawSingleContent = RawContentItem;
 
 /** Raw search / section response envelope. */
 export interface RawSearchResponse {

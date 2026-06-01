@@ -8,6 +8,7 @@
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { getGuardianService } from '@/services/guardian/guardian-service.js';
+import type { NormalizedArticle } from '@/services/guardian/types.js';
 
 // ---------------------------------------------------------------------------
 // Sub-schemas
@@ -106,6 +107,28 @@ const OutputSchema = z.object({
     .optional()
     .describe('Matching tags. Populated for list_tags mode.'),
 });
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Map a normalized article to the browse-result shape (drops contributor/pillar fields). */
+function toBrowseArticle(a: NormalizedArticle) {
+  return {
+    id: a.id,
+    headline: a.headline,
+    ...(a.standfirst !== undefined && { standfirst: a.standfirst }),
+    ...(a.byline !== undefined && { byline: a.byline }),
+    section_id: a.section_id,
+    section_name: a.section_name,
+    published_date: a.published_date,
+    web_url: a.web_url,
+    ...(a.thumbnail !== undefined && { thumbnail: a.thumbnail }),
+    ...(a.word_count !== undefined && { word_count: a.word_count }),
+    ...(a.body !== undefined && { body: a.body }),
+    truncated: a.truncated,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Tool definition
@@ -261,20 +284,7 @@ export const guardianBrowse = tool('guardian_browse', {
           total: result.total,
           page: result.page,
           pages: result.pages,
-          results: result.results.map((a) => ({
-            id: a.id,
-            headline: a.headline,
-            ...(a.standfirst !== undefined && { standfirst: a.standfirst }),
-            ...(a.byline !== undefined && { byline: a.byline }),
-            section_id: a.section_id,
-            section_name: a.section_name,
-            published_date: a.published_date,
-            web_url: a.web_url,
-            ...(a.thumbnail !== undefined && { thumbnail: a.thumbnail }),
-            ...(a.word_count !== undefined && { word_count: a.word_count }),
-            ...(a.body !== undefined && { body: a.body }),
-            truncated: a.truncated,
-          })),
+          results: result.results.map(toBrowseArticle),
         };
       }
 
@@ -304,20 +314,7 @@ export const guardianBrowse = tool('guardian_browse', {
           total: result.total,
           page: result.page,
           pages: result.pages,
-          results: result.results.map((a) => ({
-            id: a.id,
-            headline: a.headline,
-            ...(a.standfirst !== undefined && { standfirst: a.standfirst }),
-            ...(a.byline !== undefined && { byline: a.byline }),
-            section_id: a.section_id,
-            section_name: a.section_name,
-            published_date: a.published_date,
-            web_url: a.web_url,
-            ...(a.thumbnail !== undefined && { thumbnail: a.thumbnail }),
-            ...(a.word_count !== undefined && { word_count: a.word_count }),
-            ...(a.body !== undefined && { body: a.body }),
-            truncated: a.truncated,
-          })),
+          results: result.results.map(toBrowseArticle),
         };
       }
 
