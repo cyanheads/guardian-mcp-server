@@ -1,7 +1,7 @@
 {
   "name": "@cyanheads/guardian-mcp-server",
-  "version": "0.1.0",
-  "description": "MCP server for The Guardian Open Platform — journalism archive from 1999 to present with full article text.",
+  "version": "0.1.1",
+  "description": "Search, browse, and retrieve full article text from The Guardian's journalism archive (1999–present) via MCP.",
   "author": {
     "name": "cyanheads",
     "email": "casey@caseyjhand.com",
@@ -14,10 +14,10 @@
   "mcpServers": "./.codex-plugin/mcp.json",
   "interface": {
     "displayName": "@cyanheads/guardian-mcp-server",
-    "shortDescription": "MCP server for The Guardian Open Platform — journalism archive from 1999 to present with full article text.",
+    "shortDescription": "Search, browse, and retrieve full article text from The Guardian's journalism archive (1999–present) via MCP.",
     "longDescription": "",
     "developerName": "cyanheads",
-    "category": "",
+    "category": "News & Media",
     "capabilities": ["Read"],
     "websiteURL": "https://github.com/cyanheads/guardian-mcp-server",
     "defaultPrompt": []

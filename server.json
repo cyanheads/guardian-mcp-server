@@ -1,19 +1,19 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.cyanheads/guardian-mcp-server",
-  "description": "The Guardian Open Platform — journalism archive from 1999 to present with full article text.",
+  "description": "Guardian Open Platform — search and retrieve full article text from The Guardian archive.",
   "repository": {
     "url": "https://github.com/cyanheads/guardian-mcp-server",
     "source": "github"
   },
-  "version": "0.1.0",
+  "version": "0.1.1",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@cyanheads/guardian-mcp-server",
-      "runtimeHint": "node",
-      "version": "0.1.0",
+      "runtimeHint": "bun",
+      "version": "0.1.1",
       "packageArguments": [
         {
           "type": "positional",
@@ -47,8 +47,8 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@cyanheads/guardian-mcp-server",
-      "runtimeHint": "node",
-      "version": "0.1.0",
+      "runtimeHint": "bun",
+      "version": "0.1.1",
       "packageArguments": [
         {
           "type": "positional",

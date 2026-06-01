@@ -1,7 +1,7 @@
-# Developer Protocol
+# Agent Protocol
 
-**Server:** guardian-mcp-server
-**Version:** 0.1.0
+**Server:** @cyanheads/guardian-mcp-server
+**Version:** 0.1.1
 **Framework:** [@cyanheads/mcp-ts-core](https://www.npmjs.com/package/@cyanheads/mcp-ts-core) `^0.9.19`
 **Engines:** Bun ≥1.3.0, Node ≥24.0.0
 **MCP SDK:** `@modelcontextprotocol/sdk` ^1.29.0
@@ -11,33 +11,18 @@
 
 ---
 
-## First Session
-
-This project was just scaffolded with `bunx @cyanheads/mcp-ts-core init`. The framework, skills, and example definitions are in place — the domain isn't. The user's first messages will set direction; wait for them before proceeding.
-
-> **Remove this section** from CLAUDE.md / AGENTS.md after completing these steps. The skills and conventions below remain — this block is one-time onboarding only.
-
-1. **Get your bearings.** Take stock of the project tree, the skills in `skills/`, and the tools/MCP servers available. Light tool use is fine for context-building — you're mapping the territory, not committing yet.
-2. **Read the framework docs** — `node_modules/@cyanheads/mcp-ts-core/CLAUDE.md` (builders, Context, errors, exports, conventions)
-3. **Run the `setup` skill** — read `skills/setup/SKILL.md` and follow its checklist (project orientation, agent protocol file selection, echo definition cleanup, skill sync)
-4. **Design the server** — read `skills/design-mcp-server/SKILL.md` and work through it with the user to map the domain into tools, resources, and services before scaffolding
-
----
-
 ## What's Next?
 
-When the user asks what's next or needs direction, suggest options based on the current project state. Common next steps:
+When the user asks what to do next, what's left, or needs direction, suggest relevant options based on the current project state:
 
 1. **Re-run the `setup` skill** — ensures CLAUDE.md, skills, structure, and metadata are populated and up to date with the current codebase
-2. **Run the `design-mcp-server` skill** — if the tool/resource surface hasn't been mapped yet, work through domain design
-3. **Add tools/resources/prompts** — scaffold new definitions using the `add-tool`, `add-app-tool`, `add-resource`, `add-prompt` skills
-4. **Add services** — scaffold domain service integrations using the `add-service` skill
-5. **Add tests** — scaffold tests for existing definitions using the `add-test` skill
-6. **Field-test definitions** — exercise tools/resources/prompts with real inputs using the `field-test` skill, get a report of issues and pain points
-7. **Run `devcheck`** — lint, format, typecheck, and security audit
-8. **Run the `security-pass` skill** — audit handlers for MCP-specific security gaps: output injection, scope blast radius, input sinks, tenant isolation
-9. **Run the `polish-docs-meta` skill** — finalize README, CHANGELOG, metadata, and agent protocol for shipping
-10. **Run the `maintenance` skill** — investigate changelogs, adopt upstream changes, and sync skills after `bun update --latest`
+2. **Add tools/resources/prompts** — scaffold new definitions using the `add-tool`, `add-app-tool`, `add-resource`, `add-prompt` skills
+3. **Add tests** — scaffold tests for existing definitions using the `add-test` skill
+4. **Field-test definitions** — exercise tools/resources/prompts with real inputs using the `field-test` skill, get a report of issues and pain points
+5. **Run `devcheck`** — lint, format, typecheck, and security audit
+6. **Run the `security-pass` skill** — audit handlers for MCP-specific security gaps: output injection, scope blast radius, input sinks, tenant isolation
+7. **Run the `polish-docs-meta` skill** — finalize README, CHANGELOG, metadata, and agent protocol for shipping
+8. **Run the `maintenance` skill** — investigate changelogs, adopt upstream changes, and sync skills after `bun update --latest`
 
 Tailor suggestions to what's actually missing or stale — don't recite the full list every time.
 
@@ -49,7 +34,7 @@ Tailor suggestions to what's actually missing or stale — don't recite the full
 - **Use `ctx.log`** for request-scoped logging. No `console` calls.
 - **Use `ctx.state`** for tenant-scoped storage. Never access persistence directly.
 - **Check `ctx.elicit` / `ctx.sample`** for presence before calling.
-- **Secrets in env vars only** — never hardcoded.
+- **Secrets in env vars only** — never hardcoded. `GUARDIAN_API_KEY` is required and loaded via `getServerConfig()`.
 - **Close the loop on issues.** When implementing work tracked by a GitHub issue, comment on the issue with what landed and close it. Do both — a comment without a close leaves stale issues open; a close without a comment leaves no record of what shipped. The comment is for future readers — state the concrete changes, not the conversation that produced them.
 
 ---
@@ -60,71 +45,49 @@ Tailor suggestions to what's actually missing or stale — don't recite the full
 
 ```ts
 import { tool, z } from '@cyanheads/mcp-ts-core';
+import { getGuardianService } from '@/services/guardian/guardian-service.js';
 
-export const searchItems = tool('search_items', {
-  description: 'Search inventory items by query.',
+export const guardianSearch = tool('guardian_search', {
+  description:
+    "Full-text search across The Guardian's archive (1999–present) with optional section, tag, " +
+    'contributor, and date filters. Returns articles with full body text (HTML stripped, truncated ' +
+    'at 2,000 words). Powered by The Guardian (open-platform.theguardian.com).',
   annotations: { readOnlyHint: true },
+
   input: z.object({
-    query: z.string().describe('Search terms'),
-    limit: z.number().default(10).describe('Max results'),
+    query: z.string().describe('Full-text search query.'),
+    section: z.string().optional().describe('Restrict results to a section ID.'),
+    page_size: z.number().int().min(1).max(50).default(10).describe('Results per page (1–50).'),
   }),
+
   output: z.object({
-    items: z.array(z.object({
-      id: z.string().describe('Item ID'),
-      name: z.string().describe('Item name'),
-    })).describe('Matching items'),
+    total: z.number().int().describe('Total matching articles.'),
+    results: z.array(z.object({
+      id: z.string().describe('Article ID (path slug).'),
+      headline: z.string().describe('Article headline.'),
+    })).describe('Matching articles.'),
   }),
-  auth: ['inventory:read'],
+
+  errors: [
+    {
+      reason: 'no_results',
+      code: JsonRpcErrorCode.NotFound,
+      when: 'The query returned zero results.',
+      recovery: 'Broaden the query, remove filters, or try different search terms.',
+    },
+  ],
 
   async handler(input, ctx) {
-    const items = await findItems(input.query, input.limit);
-    ctx.log.info('Search completed', { query: input.query, count: items.length });
-    return { items };
+    ctx.log.info('Searching Guardian archive', { query: input.query });
+    const result = await getGuardianService().search({ query: input.query, page_size: input.page_size }, ctx);
+    if (result.total === 0) throw ctx.fail('no_results', `No articles matched "${input.query}".`);
+    return result;
   },
 
-  // format() populates content[] — the markdown twin of structuredContent.
-  // Different clients read different surfaces (Claude Code → structuredContent,
-  // Claude Desktop → content[]); both must carry the same data.
-  // Enforced at lint time: every field in `output` must appear in the rendered text.
   format: (result) => [{
     type: 'text',
-    text: result.items.map(i => `**${i.id}**: ${i.name}`).join('\n'),
+    text: result.results.map(a => `**${a.headline}** — ${a.id}`).join('\n'),
   }],
-});
-```
-
-### Resource
-
-```ts
-import { resource, z } from '@cyanheads/mcp-ts-core';
-import { notFound } from '@cyanheads/mcp-ts-core/errors';
-
-export const itemData = resource('inventory://{itemId}', {
-  description: 'Fetch an inventory item by ID.',
-  params: z.object({ itemId: z.string().describe('Item identifier') }),
-  auth: ['inventory:read'],
-  async handler(params, ctx) {
-    const item = await ctx.state.get(`item:${params.itemId}`);
-    if (!item) throw notFound(`Item ${params.itemId} not found`, { itemId: params.itemId });
-    return item;
-  },
-});
-```
-
-### Prompt
-
-```ts
-import { prompt, z } from '@cyanheads/mcp-ts-core';
-
-export const reviewCode = prompt('review_code', {
-  description: 'Review code for issues and best practices.',
-  args: z.object({
-    code: z.string().describe('Code to review'),
-    language: z.string().optional().describe('Programming language'),
-  }),
-  generate: (args) => [
-    { role: 'user', content: { type: 'text', text: `Review this ${args.language ?? ''} code:\n${args.code}` } },
-  ],
 });
 ```
 
@@ -136,21 +99,26 @@ import { z } from '@cyanheads/mcp-ts-core';
 import { parseEnvConfig } from '@cyanheads/mcp-ts-core/config';
 
 const ServerConfigSchema = z.object({
-  apiKey: z.string().describe('External API key'),
-  maxResults: z.coerce.number().default(100),
+  apiKey: z
+    .string()
+    .min(1)
+    .describe(
+      'Guardian Open Platform API key. Free (non-commercial) key available at ' +
+        'open-platform.theguardian.com. Commercial use requires a separate Guardian agreement.',
+    ),
 });
 
 let _config: z.infer<typeof ServerConfigSchema> | undefined;
-export function getServerConfig() {
+
+export function getServerConfig(): z.infer<typeof ServerConfigSchema> {
   _config ??= parseEnvConfig(ServerConfigSchema, {
-    apiKey: 'MY_API_KEY',
-    maxResults: 'MY_MAX_RESULTS',
+    apiKey: 'GUARDIAN_API_KEY',
   });
   return _config;
 }
 ```
 
-`parseEnvConfig` maps Zod schema paths → env var names so errors name the variable (`MY_API_KEY`) not the path (`apiKey`). Throws `ConfigurationError`, which the framework prints as a clean startup banner.
+`parseEnvConfig` maps Zod schema paths → env var names so errors name the variable (`GUARDIAN_API_KEY`) not the path (`apiKey`). Throws `ConfigurationError`, which the framework prints as a clean startup banner.
 
 ### Server instructions
 
@@ -179,40 +147,31 @@ Handlers receive a unified `ctx` object. Key properties:
 
 Handlers throw — the framework catches, classifies, and formats.
 
-**Recommended: typed error contract.** Declare `errors: [{ reason, code, when, recovery, retryable? }]` on `tool()` / `resource()` to receive `ctx.fail(reason, …)` typed against the reason union. TypeScript catches typos at compile time, `data.reason` is auto-populated for observability, linter enforces conformance against the handler body. `recovery` is required descriptive metadata for the agent's next move (≥ 5 words, lint-validated); for the wire `data.recovery.hint` (mirrored into `content[]` text), pass explicitly at the throw site when dynamic context matters: `ctx.fail('reason', msg, { recovery: { hint: '...' } })`. Baseline codes (`InternalError`, `ServiceUnavailable`, `Timeout`, `ValidationError`, `SerializationError`) bubble freely and don't need declaring.
+**Recommended: typed error contract.** Declare `errors: [{ reason, code, when, recovery, retryable? }]` on `tool()` / `resource()` to receive `ctx.fail(reason, …)` typed against the reason union. TypeScript catches typos at compile time, `data.reason` is auto-populated for observability, linter enforces conformance against the handler body. `recovery` is required descriptive metadata for the agent's next move (≥ 5 words, lint-validated).
 
 ```ts
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 
 errors: [
-  { reason: 'no_match', code: JsonRpcErrorCode.NotFound,
-    when: 'No item matched the query',
-    recovery: 'Broaden the query or check the spelling and try again.' },
+  { reason: 'unauthorized', code: JsonRpcErrorCode.Unauthorized,
+    when: 'The Guardian API returned 401 — the API key is missing or invalid.',
+    recovery: 'Check that GUARDIAN_API_KEY is set correctly and the key is active at open-platform.theguardian.com.' },
 ],
 async handler(input, ctx) {
-  const item = await db.find(input.id);
-  if (!item) throw ctx.fail('no_match', `No item ${input.id}`);
-  return item;
+  // ...
 }
 ```
-
-**Declare contracts inline on each tool.** The contract is part of the tool's public surface — one file should give the full picture. Don't extract a shared `errors[]` constant; per-tool repetition is the intended cost of locality.
 
 **Fallback (no contract entry fits):** throw via factories or plain `Error`.
 
 ```ts
-// Error factories — explicit code
 import { notFound, serviceUnavailable } from '@cyanheads/mcp-ts-core/errors';
-throw notFound('Item not found', { itemId });
-throw serviceUnavailable('API unavailable', { url }, { cause: err });
+throw notFound('Article not found', { article_id });
+throw serviceUnavailable('Guardian API unavailable', { url }, { cause: err });
 
 // Plain Error — framework auto-classifies from message patterns
-throw new Error('Item not found');           // → NotFound
-throw new Error('Invalid query format');     // → ValidationError
-
-// McpError — when no factory exists for the code
-import { McpError, JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
-throw new McpError(JsonRpcErrorCode.DatabaseError, 'Connection failed', { pool: 'primary' });
+throw new Error('Article not found');        // → NotFound
+throw new Error('Invalid date format');      // → ValidationError
 ```
 
 See framework CLAUDE.md and the `api-errors` skill for the full auto-classification table, all available factories, and the contract reference.
@@ -225,18 +184,16 @@ See framework CLAUDE.md and the `api-errors` skill for the full auto-classificat
 src/
   index.ts                              # createApp() entry point
   config/
-    server-config.ts                    # Server-specific env vars (Zod schema)
+    server-config.ts                    # GUARDIAN_API_KEY env var (Zod schema)
   services/
-    [domain]/
-      [domain]-service.ts               # Domain service (init/accessor pattern)
-      types.ts                          # Domain types
+    guardian/
+      guardian-service.ts               # Guardian API client (init/accessor pattern)
+      types.ts                          # Guardian domain types
   mcp-server/
     tools/definitions/
-      [tool-name].tool.ts               # Tool definitions
-    resources/definitions/
-      [resource-name].resource.ts       # Resource definitions
-    prompts/definitions/
-      [prompt-name].prompt.ts           # Prompt definitions
+      guardian-search.tool.ts           # guardian_search
+      guardian-get-article.tool.ts      # guardian_get_article
+      guardian-browse.tool.ts           # guardian_browse
 ```
 
 ---
@@ -245,10 +202,10 @@ src/
 
 | What | Convention | Example |
 |:-----|:-----------|:--------|
-| Files | kebab-case with suffix | `search-docs.tool.ts` |
-| Tool/resource/prompt names | snake_case | `search_docs` |
-| Directories | kebab-case | `src/services/doc-search/` |
-| Descriptions | Single string or template literal, no `+` concatenation | `'Search items by query and filter.'` |
+| Files | kebab-case with suffix | `guardian-search.tool.ts` |
+| Tool/resource/prompt names | snake_case | `guardian_search` |
+| Directories | kebab-case | `src/services/guardian/` |
+| Descriptions | Single string or template literal, no `+` concatenation | `'Search The Guardian archive by query and filter.'` |
 
 ---
 
@@ -322,38 +279,15 @@ When you complete a skill's checklist, check the boxes and add a completion time
 
 ## Bundling
 
-`npm run bundle` produces a `.mcpb` extension bundle for one-click install in Claude Desktop. MCPB is stdio-only — HTTP and Cloudflare Workers deployments are unaffected. Consumers who don't need it can delete `manifest.json` and `.mcpbignore`; `lint:packaging` skips cleanly.
+`bun run bundle` produces a `.mcpb` extension bundle for one-click install in Claude Desktop. MCPB is stdio-only — HTTP and Docker deployments are unaffected. Consumers who don't need it can delete `manifest.json` and `.mcpbignore`; `lint:packaging` skips cleanly.
 
 **Adding an env var requires both files:** `server.json` (registry discovery, `environmentVariables[]`) and `manifest.json` (bundle install UX, `mcp_config.env` + `user_config`). `lint:packaging` (run by `devcheck`) verifies the env var names match.
-
-**README install badges** (Claude Desktop `.mcpb`, Cursor, VS Code) and the `base64` / `encodeURIComponent` config-generation commands are ship-time concerns — run the `polish-docs-meta` skill, which carries the badge format, layout, and generation snippets in `skills/polish-docs-meta/references/readme.md`.
 
 ---
 
 ## Changelog
 
 Directory-based, grouped by minor series via the `.x` semver-wildcard convention. Source of truth: `changelog/<major.minor>.x/<version>.md` (e.g. `changelog/0.1.x/0.1.0.md`) — one file per release, shipped in the npm package. At release, author the per-version file with a concrete version and date, then run `bun run changelog:build` to regenerate the rollup. `changelog/template.md` is a **pristine format reference** — never edited or moved; read it for the frontmatter + section layout when scaffolding. `CHANGELOG.md` is a **navigation index** (header + link + summary per version), regenerated by `bun run changelog:build` — devcheck hard-fails on drift; never hand-edit it.
-
-Each per-version file opens with YAML frontmatter:
-
-```markdown
----
-summary: "One-line headline, ≤350 chars"  # required — powers the rollup index
-breaking: false                            # optional — true flags breaking changes
-security: false                            # optional — true flags security fixes
----
-
-# 0.1.0 — YYYY-MM-DD
-...
-```
-
-`breaking: true` renders a `· ⚠️ Breaking` badge — use it when consumers must update code on upgrade (signature changes, removed APIs, config renames). `security: true` renders a `· 🛡️ Security` badge and pairs with a `## Security` body section. When both are set, badges render `· ⚠️ Breaking · 🛡️ Security`.
-
-`agent-notes` is an optional free-form field for maintenance agents processing the release downstream. Content here won't appear in the rendered CHANGELOG — it's consumed by agents running the `maintenance` skill. Use it for adoption instructions that don't fit the human-facing sections: new files to create, fields to populate, one-time migration steps. Omit entirely when there's nothing to say.
-
-**Section order** (Keep a Changelog): Added, Changed, Deprecated, Removed, Fixed, Security. Include only sections with entries — don't ship empty headers.
-
-**Tag annotations** render as GitHub Release bodies via `--notes-from-tag`. They must be structured markdown — never a flat comma-separated string. Subject omits the version number (GitHub prepends it). See `changelog/template.md` for the full format reference.
 
 ---
 
@@ -365,7 +299,7 @@ import { tool, z } from '@cyanheads/mcp-ts-core';
 import { McpError, JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 
 // Server's own code — via path alias
-import { getMyService } from '@/services/my-domain/my-service.js';
+import { getGuardianService } from '@/services/guardian/guardian-service.js';
 ```
 
 ---

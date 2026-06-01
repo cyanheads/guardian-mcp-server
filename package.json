@@ -1,8 +1,8 @@
 {
   "name": "@cyanheads/guardian-mcp-server",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "mcpName": "io.github.cyanheads/guardian-mcp-server",
-  "description": "MCP server for The Guardian Open Platform — journalism archive from 1999 to present with full article text.",
+  "description": "Search, browse, and retrieve full article text from The Guardian's journalism archive (1999–present) via MCP.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

@@ -1,8 +1,8 @@
 {
   "manifest_version": "0.3",
   "name": "guardian-mcp-server",
-  "version": "0.1.0",
-  "description": "MCP server for The Guardian Open Platform — journalism archive from 1999 to present with full article text.",
+  "version": "0.1.1",
+  "description": "Search, browse, and retrieve full article text from The Guardian's journalism archive (1999–present) via MCP.",
   "author": { "name": "cyanheads" },
   "server": {
     "type": "node",
