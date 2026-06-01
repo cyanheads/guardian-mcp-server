@@ -1,0 +1,10 @@
+{
+  "@cyanheads/guardian-mcp-server": {
+    "command": "npx",
+    "args": ["-y", "@cyanheads/guardian-mcp-server"],
+    "env": {
+      "MCP_TRANSPORT_TYPE": "stdio",
+      "GUARDIAN_API_KEY": ""
+    }
+  }
+}

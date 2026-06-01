@@ -1,0 +1,25 @@
+{
+  "name": "@cyanheads/guardian-mcp-server",
+  "version": "0.1.0",
+  "description": "MCP server for The Guardian Open Platform — journalism archive from 1999 to present with full article text.",
+  "author": {
+    "name": "cyanheads",
+    "email": "casey@caseyjhand.com",
+    "url": "https://github.com/cyanheads"
+  },
+  "homepage": "https://github.com/cyanheads/guardian-mcp-server#readme",
+  "repository": "https://github.com/cyanheads/guardian-mcp-server",
+  "license": "Apache-2.0",
+  "keywords": ["guardian", "news", "journalism", "mcp", "mcp-server", "model-context-protocol"],
+  "mcpServers": "./.codex-plugin/mcp.json",
+  "interface": {
+    "displayName": "@cyanheads/guardian-mcp-server",
+    "shortDescription": "MCP server for The Guardian Open Platform — journalism archive from 1999 to present with full article text.",
+    "longDescription": "",
+    "developerName": "cyanheads",
+    "category": "",
+    "capabilities": ["Read"],
+    "websiteURL": "https://github.com/cyanheads/guardian-mcp-server",
+    "defaultPrompt": []
+  }
+}
