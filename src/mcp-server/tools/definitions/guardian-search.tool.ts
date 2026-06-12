@@ -139,6 +139,13 @@ export const guardianSearch = tool('guardian_search', {
   }),
 
   enrichment: {
+    totalCount: z
+      .number()
+      .int()
+      .optional()
+      .describe(
+        'Total matching articles across all pages — discloses how many results exist beyond this capped page.',
+      ),
     notice: z
       .string()
       .optional()
@@ -163,7 +170,7 @@ export const guardianSearch = tool('guardian_search', {
     },
     {
       reason: 'invalid_date',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'from_date or to_date is not a valid YYYY-MM-DD string.',
       recovery: 'Provide dates in YYYY-MM-DD format, e.g. "2024-01-15".',
     },
@@ -224,6 +231,7 @@ export const guardianSearch = tool('guardian_search', {
       throw ctx.fail('no_results', `No articles matched "${input.query}".`);
     }
 
+    ctx.enrich.total(result.total);
     return result;
   },
 

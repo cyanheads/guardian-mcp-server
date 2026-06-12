@@ -218,6 +218,16 @@ export const guardianBrowse = tool('guardian_browse', {
 
   output: OutputSchema,
 
+  enrichment: {
+    totalCount: z
+      .number()
+      .int()
+      .optional()
+      .describe(
+        'Total items available (articles, sections, or tags) — discloses how many exist beyond this capped page.',
+      ),
+  },
+
   errors: [
     {
       reason: 'unauthorized',
@@ -228,13 +238,13 @@ export const guardianBrowse = tool('guardian_browse', {
     },
     {
       reason: 'missing_section_id',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'mode is section_latest but section_id is not provided.',
       recovery: 'Provide a section_id. Use mode=list_sections first to discover valid section IDs.',
     },
     {
       reason: 'missing_tag_id',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'mode is tag_latest but tag_id is not provided.',
       recovery: 'Provide a tag_id. Use mode=list_tags with a query to discover valid tag IDs.',
     },
@@ -279,6 +289,7 @@ export const guardianBrowse = tool('guardian_browse', {
             `Section "${input.section_id}" returned no content — it may not be a valid section ID.`,
           );
         }
+        ctx.enrich.total(result.total);
         return {
           mode: 'section_latest' as const,
           total: result.total,
@@ -309,6 +320,7 @@ export const guardianBrowse = tool('guardian_browse', {
             `Tag "${input.tag_id}" returned no content — it may not be a valid tag ID.`,
           );
         }
+        ctx.enrich.total(result.total);
         return {
           mode: 'tag_latest' as const,
           total: result.total,
@@ -321,6 +333,7 @@ export const guardianBrowse = tool('guardian_browse', {
       case 'list_sections': {
         ctx.log.info('Listing Guardian sections', { query: input.query });
         const result = await svc.getSections(input.query, ctx);
+        ctx.enrich.total(result.total);
         return {
           mode: 'list_sections' as const,
           total: result.total,
@@ -339,6 +352,7 @@ export const guardianBrowse = tool('guardian_browse', {
         if (input.query !== undefined) tagsParams.query = input.query;
         if (input.tag_type !== undefined) tagsParams.tag_type = input.tag_type;
         const result = await svc.getTags(tagsParams, ctx);
+        ctx.enrich.total(result.total);
         return {
           mode: 'list_tags' as const,
           total: result.total,

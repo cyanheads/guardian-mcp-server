@@ -93,7 +93,7 @@ describe('guardianBrowse', () => {
       const input = guardianBrowse.input.parse({ mode: 'section_latest' });
 
       await expect(guardianBrowse.handler(input, ctx)).rejects.toMatchObject({
-        code: JsonRpcErrorCode.InvalidParams,
+        code: JsonRpcErrorCode.ValidationError,
         data: { reason: 'missing_section_id' },
       });
     });
@@ -139,7 +139,7 @@ describe('guardianBrowse', () => {
       const input = guardianBrowse.input.parse({ mode: 'tag_latest' });
 
       await expect(guardianBrowse.handler(input, ctx)).rejects.toMatchObject({
-        code: JsonRpcErrorCode.InvalidParams,
+        code: JsonRpcErrorCode.ValidationError,
         data: { reason: 'missing_tag_id' },
       });
     });

@@ -98,7 +98,7 @@ describe('guardianSearch', () => {
       });
 
       await expect(guardianSearch.handler(input, ctx)).rejects.toMatchObject({
-        code: JsonRpcErrorCode.InvalidParams,
+        code: JsonRpcErrorCode.ValidationError,
         data: { reason: 'invalid_date' },
       });
     });
@@ -111,7 +111,7 @@ describe('guardianSearch', () => {
       });
 
       await expect(guardianSearch.handler(input, ctx)).rejects.toMatchObject({
-        code: JsonRpcErrorCode.InvalidParams,
+        code: JsonRpcErrorCode.ValidationError,
         data: { reason: 'invalid_date' },
       });
     });

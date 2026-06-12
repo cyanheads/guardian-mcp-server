@@ -11,6 +11,8 @@ import { guardianSearch } from './mcp-server/tools/definitions/guardian-search.t
 import { initGuardianService } from './services/guardian/guardian-service.js';
 
 await createApp({
+  name: 'guardian-mcp-server',
+  title: 'guardian-mcp-server',
   tools: [guardianSearch, guardianGetArticle, guardianBrowse],
   resources: [],
   prompts: [],
