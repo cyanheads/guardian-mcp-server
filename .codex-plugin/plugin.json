@@ -1,5 +1,5 @@
 {
-  "name": "@cyanheads/guardian-mcp-server",
+  "name": "guardian-mcp-server",
   "version": "0.1.2",
   "description": "Search, browse, and retrieve full article text from The Guardian's journalism archive (1999–present) via MCP.",
   "author": {
@@ -13,7 +13,7 @@
   "keywords": ["guardian", "news", "journalism", "mcp", "mcp-server", "model-context-protocol"],
   "mcpServers": "./.codex-plugin/mcp.json",
   "interface": {
-    "displayName": "@cyanheads/guardian-mcp-server",
+    "displayName": "guardian-mcp-server",
     "shortDescription": "Search, browse, and retrieve full article text from The Guardian's journalism archive (1999–present) via MCP.",
     "longDescription": "",
     "developerName": "cyanheads",

@@ -1,5 +1,5 @@
 {
-  "name": "@cyanheads/guardian-mcp-server",
+  "name": "guardian-mcp-server",
   "version": "0.1.2",
   "description": "Search, browse, and retrieve full article text from The Guardian's journalism archive (1999–present) via MCP.",
   "author": {
@@ -9,7 +9,7 @@
   "repository": "https://github.com/cyanheads/guardian-mcp-server",
   "license": "Apache-2.0",
   "mcpServers": {
-    "@cyanheads/guardian-mcp-server": {
+    "guardian-mcp-server": {
       "command": "npx",
       "args": ["-y", "@cyanheads/guardian-mcp-server"],
       "env": {
