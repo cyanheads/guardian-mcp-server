@@ -275,7 +275,9 @@ export const guardianBrowse = tool('guardian_browse', {
     switch (input.mode) {
       case 'section_latest': {
         if (!input.section_id) {
-          throw ctx.fail('missing_section_id', 'section_id is required for section_latest mode.');
+          throw ctx.fail('missing_section_id', 'section_id is required for section_latest mode.', {
+            ...ctx.recoveryFor('missing_section_id'),
+          });
         }
         ctx.log.info('Browsing section latest', { section_id: input.section_id });
         const result = await svc.getSectionContent(
@@ -287,6 +289,7 @@ export const guardianBrowse = tool('guardian_browse', {
           throw ctx.fail(
             'section_not_found',
             `Section "${input.section_id}" returned no content — it may not be a valid section ID.`,
+            { ...ctx.recoveryFor('section_not_found') },
           );
         }
         ctx.enrich.total(result.total);
@@ -301,7 +304,9 @@ export const guardianBrowse = tool('guardian_browse', {
 
       case 'tag_latest': {
         if (!input.tag_id) {
-          throw ctx.fail('missing_tag_id', 'tag_id is required for tag_latest mode.');
+          throw ctx.fail('missing_tag_id', 'tag_id is required for tag_latest mode.', {
+            ...ctx.recoveryFor('missing_tag_id'),
+          });
         }
         ctx.log.info('Browsing tag latest', { tag_id: input.tag_id });
         const result = await svc.search(
@@ -318,6 +323,7 @@ export const guardianBrowse = tool('guardian_browse', {
           throw ctx.fail(
             'tag_not_found',
             `Tag "${input.tag_id}" returned no content — it may not be a valid tag ID.`,
+            { ...ctx.recoveryFor('tag_not_found') },
           );
         }
         ctx.enrich.total(result.total);

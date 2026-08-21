@@ -191,10 +191,13 @@ export const guardianSearch = tool('guardian_search', {
       throw ctx.fail(
         'invalid_date',
         `Invalid from_date "${input.from_date}". Expected YYYY-MM-DD.`,
+        { ...ctx.recoveryFor('invalid_date') },
       );
     }
     if (input.to_date && !dateRe.test(input.to_date)) {
-      throw ctx.fail('invalid_date', `Invalid to_date "${input.to_date}". Expected YYYY-MM-DD.`);
+      throw ctx.fail('invalid_date', `Invalid to_date "${input.to_date}". Expected YYYY-MM-DD.`, {
+        ...ctx.recoveryFor('invalid_date'),
+      });
     }
 
     ctx.log.info('Searching Guardian archive', {
@@ -228,7 +231,9 @@ export const guardianSearch = tool('guardian_search', {
       ctx.enrich.notice(
         `No articles matched "${input.query}". Try broader terms, remove section/tag filters, or adjust the date range.`,
       );
-      throw ctx.fail('no_results', `No articles matched "${input.query}".`);
+      throw ctx.fail('no_results', `No articles matched "${input.query}".`, {
+        ...ctx.recoveryFor('no_results'),
+      });
     }
 
     ctx.enrich.total(result.total);

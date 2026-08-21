@@ -6,7 +6,7 @@
 
 import type { Context } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode, McpError, serviceUnavailable } from '@cyanheads/mcp-ts-core/errors';
-import { fetchWithTimeout, requestContextService, withRetry } from '@cyanheads/mcp-ts-core/utils';
+import { fetchWithTimeout, withRetry } from '@cyanheads/mcp-ts-core/utils';
 import { getServerConfig } from '@/config/server-config.js';
 import type {
   NormalizedArticle,
@@ -133,23 +133,6 @@ function normalizeArticle(raw: RawContentItem | RawSingleContent): NormalizedArt
 }
 
 // ---------------------------------------------------------------------------
-// Context helper
-// ---------------------------------------------------------------------------
-
-/** Build a RequestContext from a handler Context for use with fetchWithTimeout/withRetry. */
-function makeReqCtx(operation: string, ctx: Context) {
-  return requestContextService.createRequestContext({
-    operation,
-    parentContext: {
-      requestId: ctx.requestId,
-      traceId: ctx.traceId,
-      tenantId: ctx.tenantId,
-      timestamp: new Date().toISOString(),
-    },
-  });
-}
-
-// ---------------------------------------------------------------------------
 // HTTP helpers
 // ---------------------------------------------------------------------------
 
@@ -182,10 +165,16 @@ function redactApiKey(message: string): string {
 
 /**
  * Annotate a caught McpError from fetchWithTimeout with a contract reason so
- * tool handlers get `data.reason` populated. Always redacts the API key from
- * the message before rethrowing, even when the error already carries a reason.
+ * tool handlers get `data.reason` populated. Resolves the calling tool's
+ * declared recovery hint via `ctx.recoveryFor` ({} when the reason isn't in
+ * the caller's contract). Always redacts the API key from the message before
+ * rethrowing, even when the error already carries a reason.
  */
-function annotateHttpError(err: unknown, opts: { notFoundReason?: string } = {}): never {
+function annotateHttpError(
+  err: unknown,
+  ctx: Context,
+  opts: { notFoundReason?: string } = {},
+): never {
   if (!(err instanceof McpError)) throw err;
 
   const safeMessage = redactApiKey(err.message);
@@ -203,18 +192,21 @@ function annotateHttpError(err: unknown, opts: { notFoundReason?: string } = {})
     throw new McpError(JsonRpcErrorCode.Unauthorized, safeMessage, {
       ...(err.data as object | undefined),
       reason: 'unauthorized',
+      ...ctx.recoveryFor('unauthorized'),
     });
   }
   if (status === 404 && opts.notFoundReason) {
     throw new McpError(JsonRpcErrorCode.NotFound, safeMessage, {
       ...(err.data as object | undefined),
       reason: opts.notFoundReason,
+      ...ctx.recoveryFor(opts.notFoundReason),
     });
   }
   // All other non-OK statuses map to api_error
   throw new McpError(err.code, safeMessage, {
     ...(err.data as object | undefined),
     reason: 'api_error',
+    ...ctx.recoveryFor('api_error'),
   });
 }
 
@@ -224,7 +216,7 @@ function annotateHttpError(err: unknown, opts: { notFoundReason?: string } = {})
 
 export class GuardianService {
   /** Full-text search across the Guardian archive. */
-  async search(
+  search(
     params: {
       query: string;
       section?: string;
@@ -257,10 +249,9 @@ export class GuardianService {
       'page-size': params.page_size ?? 10,
     });
 
-    const reqCtx = makeReqCtx('GuardianService.search', ctx);
     return withRetry(
       async () => {
-        const response = await fetchWithTimeout(url, TIMEOUT_MS, reqCtx, { signal: ctx.signal });
+        const response = await fetchWithTimeout(url, TIMEOUT_MS, ctx, { signal: ctx.signal });
         const text = await response.text();
         assertNotHtmlPage(text);
         const data = JSON.parse(text) as RawSearchResponse;
@@ -277,24 +268,23 @@ export class GuardianService {
       },
       {
         operation: 'GuardianService.search',
-        context: reqCtx,
+        context: ctx,
         baseDelayMs: 500,
         signal: ctx.signal,
       },
-    ).catch(annotateHttpError);
+    ).catch((err) => annotateHttpError(err, ctx));
   }
 
   /** Fetch a single article by its path-slug ID. */
-  async getContent(articleId: string, ctx: Context): Promise<NormalizedArticle> {
+  getContent(articleId: string, ctx: Context): Promise<NormalizedArticle> {
     const url = buildUrl(`/${articleId}`, {
       'show-fields': SHOW_FIELDS,
       'show-tags': 'contributor',
     });
 
-    const reqCtx = makeReqCtx('GuardianService.getContent', ctx);
     return withRetry(
       async () => {
-        const response = await fetchWithTimeout(url, TIMEOUT_MS, reqCtx, { signal: ctx.signal });
+        const response = await fetchWithTimeout(url, TIMEOUT_MS, ctx, { signal: ctx.signal });
         const text = await response.text();
         assertNotHtmlPage(text);
         const data = JSON.parse(text) as RawSingleResponse;
@@ -302,15 +292,15 @@ export class GuardianService {
       },
       {
         operation: 'GuardianService.getContent',
-        context: reqCtx,
+        context: ctx,
         baseDelayMs: 500,
         signal: ctx.signal,
       },
-    ).catch((err) => annotateHttpError(err, { notFoundReason: 'not_found' }));
+    ).catch((err) => annotateHttpError(err, ctx, { notFoundReason: 'not_found' }));
   }
 
   /** Fetch latest content from a section ID. */
-  async getSectionContent(
+  getSectionContent(
     sectionId: string,
     pageParams: { page?: number; page_size?: number },
     ctx: Context,
@@ -322,10 +312,9 @@ export class GuardianService {
       'page-size': pageParams.page_size ?? 10,
     });
 
-    const reqCtx = makeReqCtx('GuardianService.getSectionContent', ctx);
     return withRetry(
       async () => {
-        const response = await fetchWithTimeout(url, TIMEOUT_MS, reqCtx, { signal: ctx.signal });
+        const response = await fetchWithTimeout(url, TIMEOUT_MS, ctx, { signal: ctx.signal });
         const text = await response.text();
         assertNotHtmlPage(text);
         const data = JSON.parse(text) as RawSearchResponse;
@@ -342,21 +331,20 @@ export class GuardianService {
       },
       {
         operation: 'GuardianService.getSectionContent',
-        context: reqCtx,
+        context: ctx,
         baseDelayMs: 500,
         signal: ctx.signal,
       },
-    ).catch((err) => annotateHttpError(err, { notFoundReason: 'section_not_found' }));
+    ).catch((err) => annotateHttpError(err, ctx, { notFoundReason: 'section_not_found' }));
   }
 
   /** Fetch all Guardian sections, optionally filtering by query. */
-  async getSections(query: string | undefined, ctx: Context): Promise<NormalizedSectionsResult> {
+  getSections(query: string | undefined, ctx: Context): Promise<NormalizedSectionsResult> {
     const url = buildUrl('/sections', { q: query });
 
-    const reqCtx = makeReqCtx('GuardianService.getSections', ctx);
     return withRetry(
       async () => {
-        const response = await fetchWithTimeout(url, TIMEOUT_MS, reqCtx, { signal: ctx.signal });
+        const response = await fetchWithTimeout(url, TIMEOUT_MS, ctx, { signal: ctx.signal });
         const text = await response.text();
         assertNotHtmlPage(text);
         const data = JSON.parse(text) as RawSectionsResponse;
@@ -372,15 +360,15 @@ export class GuardianService {
       },
       {
         operation: 'GuardianService.getSections',
-        context: reqCtx,
+        context: ctx,
         baseDelayMs: 500,
         signal: ctx.signal,
       },
-    ).catch(annotateHttpError);
+    ).catch((err) => annotateHttpError(err, ctx));
   }
 
   /** Search the Guardian tag taxonomy. */
-  async getTags(
+  getTags(
     params: {
       query?: string;
       tag_type?: string;
@@ -398,10 +386,9 @@ export class GuardianService {
       'page-size': params.page_size ?? 10,
     });
 
-    const reqCtx = makeReqCtx('GuardianService.getTags', ctx);
     return withRetry(
       async () => {
-        const response = await fetchWithTimeout(url, TIMEOUT_MS, reqCtx, { signal: ctx.signal });
+        const response = await fetchWithTimeout(url, TIMEOUT_MS, ctx, { signal: ctx.signal });
         const text = await response.text();
         assertNotHtmlPage(text);
         const data = JSON.parse(text) as RawTagsResponse;
@@ -425,11 +412,11 @@ export class GuardianService {
       },
       {
         operation: 'GuardianService.getTags',
-        context: reqCtx,
+        context: ctx,
         baseDelayMs: 500,
         signal: ctx.signal,
       },
-    ).catch(annotateHttpError);
+    ).catch((err) => annotateHttpError(err, ctx));
   }
 }
 
