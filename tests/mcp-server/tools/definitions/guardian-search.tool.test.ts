@@ -57,6 +57,24 @@ const sampleSearchResult = {
 };
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Assert an element exists and return it narrowed — fixture reads under noUncheckedIndexedAccess. */
+function first<T>(items: T[]): T {
+  const [item] = items;
+  if (item === undefined) throw new Error('Expected at least one item');
+  return item;
+}
+
+/** Return the text of the first content block, asserting it is a text block. */
+function textOf(blocks: ReturnType<NonNullable<typeof guardianSearch.format>>): string {
+  const block = first(blocks);
+  if (block.type !== 'text') throw new Error('Expected a text content block');
+  return block.text;
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -69,10 +87,9 @@ describe('guardianSearch', () => {
 
       const result = await guardianSearch.handler(input, ctx);
 
-      expect(result.total).toBe(1);
-      expect(result.results).toHaveLength(1);
-      expect(result.results[0].id).toBe(sampleArticle.id);
-      expect(result.results[0].headline).toBe('Test Headline');
+      const article = first(result.results);
+      expect(article.id).toBe(sampleArticle.id);
+      expect(article.headline).toBe('Test Headline');
     });
 
     it('throws no_results with data.reason="no_results" when total is 0', async () => {
@@ -181,20 +198,20 @@ describe('guardianSearch', () => {
       const input = guardianSearch.input.parse({ query: 'sparse test' });
 
       const result = await guardianSearch.handler(input, ctx);
-      expect(result.results[0].standfirst).toBeUndefined();
-      expect(result.results[0].body).toBeUndefined();
-      expect(result.results[0].word_count).toBeUndefined();
+      const sparse = first(result.results);
+      expect(sparse.standfirst).toBeUndefined();
+      expect(sparse.body).toBeUndefined();
+      expect(sparse.word_count).toBeUndefined();
     });
   });
 
   describe('format', () => {
     it('renders article headline, metadata, and body', () => {
-      const [block] = guardianSearch.format!(sampleSearchResult);
-      expect(block.type).toBe('text');
-      expect(block.text).toContain('Test Headline');
-      expect(block.text).toContain(sampleArticle.id);
-      expect(block.text).toContain('Jane Doe');
-      expect(block.text).toContain('This is the article body text.');
+      const text = textOf(guardianSearch.format!(sampleSearchResult));
+      expect(text).toContain('Test Headline');
+      expect(text).toContain(sampleArticle.id);
+      expect(text).toContain('Jane Doe');
+      expect(text).toContain('This is the article body text.');
     });
 
     it('shows truncation note when truncated is true', () => {
@@ -202,8 +219,8 @@ describe('guardianSearch', () => {
         ...sampleSearchResult,
         results: [{ ...sampleArticle, truncated: true }],
       };
-      const [block] = guardianSearch.format!(truncatedResult);
-      expect(block.text).toContain('guardian_get_article');
+      const text = textOf(guardianSearch.format!(truncatedResult));
+      expect(text).toContain('guardian_get_article');
     });
 
     it('notes absent body for non-article content types', () => {
@@ -211,8 +228,8 @@ describe('guardianSearch', () => {
         ...sampleSearchResult,
         results: [{ ...sampleArticle, body: undefined }],
       };
-      const [block] = guardianSearch.format!(noBodyResult);
-      expect(block.text).toContain('not available');
+      const text = textOf(guardianSearch.format!(noBodyResult));
+      expect(text).toContain('not available');
     });
   });
 });

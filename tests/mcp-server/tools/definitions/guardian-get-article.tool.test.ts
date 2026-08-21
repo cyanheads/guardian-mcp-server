@@ -47,6 +47,19 @@ const sampleArticle = {
 };
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Return the text of the first content block, asserting it is a text block. */
+function textOf(blocks: ReturnType<NonNullable<typeof guardianGetArticle.format>>): string {
+  const [block] = blocks;
+  if (block === undefined || block.type !== 'text') {
+    throw new Error('Expected a text content block');
+  }
+  return block.text;
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -156,21 +169,22 @@ describe('guardianGetArticle', () => {
 
   describe('format', () => {
     it('renders headline, metadata, and body', () => {
-      const [block] = guardianGetArticle.format!(
-        sampleArticle as ReturnType<typeof guardianGetArticle.handler> extends Promise<infer T>
-          ? T
-          : never,
+      const text = textOf(
+        guardianGetArticle.format!(
+          sampleArticle as ReturnType<typeof guardianGetArticle.handler> extends Promise<infer T>
+            ? T
+            : never,
+        ),
       );
-      expect(block.type).toBe('text');
-      expect(block.text).toContain('Full Article Headline');
-      expect(block.text).toContain('John Smith');
-      expect(block.text).toContain(sampleArticle.body);
+      expect(text).toContain('Full Article Headline');
+      expect(text).toContain('John Smith');
+      expect(text).toContain(sampleArticle.body);
     });
 
     it('notes truncation when truncated is true', () => {
       const truncated = { ...sampleArticle, truncated: true };
-      const [block] = guardianGetArticle.format!(truncated as never);
-      expect(block.text).toContain('truncated');
+      const text = textOf(guardianGetArticle.format!(truncated as never));
+      expect(text).toContain('truncated');
     });
   });
 });

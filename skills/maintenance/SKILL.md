@@ -227,16 +227,18 @@ Present a concise numbered summary to the user:
 
 ## Checklist
 
-- [ ] Update applied (`bun update --latest`) — Mode A, or already done by user — Mode B
-- [ ] Skill-version paradox checked — if package maintenance skill version > running version, Phase A run first and skill re-invoked
-- [ ] `changelog` skill invoked for each updated package
-- [ ] Framework CHANGELOG reviewed if `@cyanheads/mcp-ts-core` was updated
-- [ ] Framework `CLAUDE.md`/`AGENTS.md` template reviewed; applicable updates applied or conflicts surfaced
-- [ ] Step 6 complete — all applicable framework adoption sites updated; third-party adoption decisions recorded
-- [ ] Project `skills/` synced from package (Phase A), with a change report
-- [ ] Agent skill directories (`.claude/skills/`, `.agents/skills/`, etc.) refreshed from project `skills/` (Phase B)
-- [ ] Framework `scripts/` and pristine reference files resynced from package via content-hash compare (Phase C), with a change report; diffs reviewed before committing
-- [ ] `bun run rebuild` succeeds (re-run after Step 6, even in Mode B)
-- [ ] `bun run devcheck` passes (includes audit + outdated)
-- [ ] `bun run test` passes
-- [ ] Numbered summary presented to user
+- [x] Update applied (`bun update --latest`) — Mode A, or already done by user — Mode B
+- [x] Skill-version paradox checked — if package maintenance skill version > running version, Phase A run first and skill re-invoked
+- [x] `changelog` skill invoked for each updated package
+- [x] Framework CHANGELOG reviewed if `@cyanheads/mcp-ts-core` was updated
+- [x] Framework `CLAUDE.md`/`AGENTS.md` template reviewed; applicable updates applied or conflicts surfaced
+- [x] Step 6 complete — all applicable framework adoption sites updated; third-party adoption decisions recorded
+- [x] Project `skills/` synced from package (Phase A), with a change report
+- [x] Agent skill directories (`.claude/skills/`, `.agents/skills/`, etc.) refreshed from project `skills/` (Phase B)
+- [x] Framework `scripts/` and pristine reference files resynced from package via content-hash compare (Phase C), with a change report; diffs reviewed before committing
+- [x] `bun run rebuild` succeeds (re-run after Step 6, even in Mode B)
+- [x] `bun run devcheck` passes (includes audit + outdated)
+- [x] `bun run test` passes
+- [x] Numbered summary presented to user
+
+Completed: 2026-08-21

@@ -69,6 +69,24 @@ const sampleTags = [
 ];
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Assert an element exists and return it narrowed — fixture reads under noUncheckedIndexedAccess. */
+function first<T>(items: T[]): T {
+  const [item] = items;
+  if (item === undefined) throw new Error('Expected at least one item');
+  return item;
+}
+
+/** Return the text of the first content block, asserting it is a text block. */
+function textOf(blocks: ReturnType<NonNullable<typeof guardianBrowse.format>>): string {
+  const block = first(blocks);
+  if (block.type !== 'text') throw new Error('Expected a text content block');
+  return block.text;
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -168,7 +186,7 @@ describe('guardianBrowse', () => {
       if (result.mode === 'list_sections') {
         expect(result.total).toBe(2);
         expect(result.sections).toHaveLength(2);
-        expect(result.sections[0].id).toBe('world');
+        expect(first(result.sections ?? []).id).toBe('world');
       }
     });
 
@@ -194,7 +212,7 @@ describe('guardianBrowse', () => {
       expect(result.mode).toBe('list_tags');
       if (result.mode === 'list_tags') {
         expect(result.total).toBe(1);
-        expect(result.tags[0].id).toBe('environment/climate-change');
+        expect(first(result.tags ?? []).id).toBe('environment/climate-change');
       }
     });
 
@@ -253,10 +271,9 @@ describe('guardianBrowse', () => {
       const input = guardianBrowse.input.parse({ mode: 'section_latest', section_id: 'world' });
       const result = await guardianBrowse.handler(input, ctx);
 
-      const [block] = guardianBrowse.format!(result);
-      expect(block.type).toBe('text');
-      expect(block.text).toContain('Test Article');
-      expect(block.text).toContain('section_latest');
+      const text = textOf(guardianBrowse.format!(result));
+      expect(text).toContain('Test Article');
+      expect(text).toContain('section_latest');
     });
 
     it('renders list_sections results', async () => {
@@ -265,10 +282,10 @@ describe('guardianBrowse', () => {
       const input = guardianBrowse.input.parse({ mode: 'list_sections' });
       const result = await guardianBrowse.handler(input, ctx);
 
-      const [block] = guardianBrowse.format!(result);
-      expect(block.text).toContain('list_sections');
-      expect(block.text).toContain('world');
-      expect(block.text).toContain('politics');
+      const text = textOf(guardianBrowse.format!(result));
+      expect(text).toContain('list_sections');
+      expect(text).toContain('world');
+      expect(text).toContain('politics');
     });
 
     it('renders list_tags results', async () => {
@@ -277,9 +294,9 @@ describe('guardianBrowse', () => {
       const input = guardianBrowse.input.parse({ mode: 'list_tags', query: 'climate' });
       const result = await guardianBrowse.handler(input, ctx);
 
-      const [block] = guardianBrowse.format!(result);
-      expect(block.text).toContain('Climate change');
-      expect(block.text).toContain('environment/climate-change');
+      const text = textOf(guardianBrowse.format!(result));
+      expect(text).toContain('Climate change');
+      expect(text).toContain('environment/climate-change');
     });
   });
 });

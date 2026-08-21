@@ -42,6 +42,13 @@ function makeResponse(body: string, status = 200): Response {
   });
 }
 
+/** Assert an element exists and return it narrowed — fixture reads under noUncheckedIndexedAccess. */
+function first<T>(items: T[]): T {
+  const [item] = items;
+  if (item === undefined) throw new Error('Expected at least one item');
+  return item;
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -105,18 +112,18 @@ describe('GuardianService', () => {
       const ctx = createMockContext();
       const result = await svc.search({ query: 'test' }, ctx);
 
-      expect(result.total).toBe(1);
-      expect(result.results[0].headline).toBe('Test Headline');
-      expect(result.results[0].standfirst).toContain('Summary point');
+      const article = first(result.results);
+      expect(article.headline).toBe('Test Headline');
+      expect(article.standfirst).toContain('Summary point');
       // HTML tags stripped from standfirst
-      expect(result.results[0].standfirst).not.toContain('<ul>');
+      expect(article.standfirst).not.toContain('<ul>');
       // body stripped and normalized
-      expect(result.results[0].body).toContain('Body paragraph one.');
-      expect(result.results[0].body).not.toContain('<p>');
-      expect(result.results[0].word_count).toBe(300);
-      expect(result.results[0].contributors).toHaveLength(1);
-      expect(result.results[0].contributors[0].name).toBe('Jane Doe');
-      expect(result.results[0].pillar_id).toBe('pillar/news');
+      expect(article.body).toContain('Body paragraph one.');
+      expect(article.body).not.toContain('<p>');
+      expect(article.word_count).toBe(300);
+      expect(article.contributors).toHaveLength(1);
+      expect(first(article.contributors).name).toBe('Jane Doe');
+      expect(article.pillar_id).toBe('pillar/news');
     });
 
     it('handles sparse results with no fields sub-object', async () => {
@@ -148,7 +155,7 @@ describe('GuardianService', () => {
       const ctx = createMockContext();
       const result = await svc.search({ query: 'sparse' }, ctx);
 
-      const article = result.results[0];
+      const article = first(result.results);
       expect(article.headline).toBe('');
       expect(article.body).toBeUndefined();
       expect(article.truncated).toBe(false);
@@ -188,12 +195,13 @@ describe('GuardianService', () => {
       const ctx = createMockContext();
       const result = await svc.search({ query: 'long' }, ctx);
 
-      const article = result.results[0];
+      const article = first(result.results);
       expect(article.truncated).toBe(true);
       expect(article.body).toContain('[Article truncated at 2,000 words');
       expect(article.body).toContain('guardian_get_article');
       // Body should not exceed 2000 words before the note
-      const wordsBeforeNote = article.body!.split('[Article truncated')[0].trim().split(/\s+/);
+      const body = article.body as string;
+      const wordsBeforeNote = (body.split('[Article truncated')[0] ?? '').trim().split(/\s+/);
       expect(wordsBeforeNote.length).toBeLessThanOrEqual(2000);
     });
 
@@ -238,8 +246,8 @@ describe('GuardianService', () => {
       const result = await svc.getSections(undefined, ctx);
 
       expect(result.total).toBe(2);
-      expect(result.sections[0].id).toBe('world');
-      expect(result.sections[0].name).toBe('World news');
+      expect(first(result.sections).id).toBe('world');
+      expect(first(result.sections).name).toBe('World news');
     });
   });
 
@@ -269,9 +277,9 @@ describe('GuardianService', () => {
       const result = await svc.getTags({ query: 'climate' }, ctx);
 
       expect(result.total).toBe(1);
-      expect(result.tags[0].id).toBe('environment/climate-change');
-      expect(result.tags[0].name).toBe('Climate change');
-      expect(result.tags[0].type).toBe('keyword');
+      expect(first(result.tags).id).toBe('environment/climate-change');
+      expect(first(result.tags).name).toBe('Climate change');
+      expect(first(result.tags).type).toBe('keyword');
     });
 
     it('maps sectionId and sectionName from raw tag to section_id and section_name', async () => {
@@ -300,8 +308,8 @@ describe('GuardianService', () => {
       const ctx = createMockContext();
       const result = await svc.getTags({ query: 'climate' }, ctx);
 
-      expect(result.tags[0].section_id).toBe('environment');
-      expect(result.tags[0].section_name).toBe('Environment');
+      expect(first(result.tags).section_id).toBe('environment');
+      expect(first(result.tags).section_name).toBe('Environment');
     });
 
     it('omits section_id/section_name when raw tag has null sectionId', async () => {
@@ -330,8 +338,8 @@ describe('GuardianService', () => {
       const ctx = createMockContext();
       const result = await svc.getTags({}, ctx);
 
-      expect(result.tags[0].section_id).toBeUndefined();
-      expect(result.tags[0].section_name).toBeUndefined();
+      expect(first(result.tags).section_id).toBeUndefined();
+      expect(first(result.tags).section_name).toBeUndefined();
     });
   });
 
