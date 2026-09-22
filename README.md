@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.1.3-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/guardian-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-%5E2.0.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/guardian-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/guardian-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-%5E7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.3.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.1.3-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/guardian-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-%5E2.0.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/guardian-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/guardian-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-%5E7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -21,91 +21,74 @@
 
 ---
 
-## Prerequisites
+## Overview
 
-> **A free Guardian Open Platform API key is required.** Register at [https://open-platform.theguardian.com/access](https://open-platform.theguardian.com/access) — the non-commercial developer tier is free. Set it as `GUARDIAN_API_KEY` in your MCP client config or `.env` file. The server will not start without it.
->
-> **Rate limits (free tier):** 5,000 requests/day, 12 calls/second. The server applies no additional throttling — stay within these bounds.
+The Guardian's journalism archive (1999–present), via the Guardian Open Platform API. Search full text, browse by section or tag, and fetch complete untruncated articles from any MCP client. Runs as a stdio process or a local Streamable HTTP server.
 
----
-
-## Tools
-
-Three tools for working with The Guardian's journalism archive:
+### Tools
 
 | Tool | Description |
 |:-----|:------------|
-| `guardian_search` | Full-text search across The Guardian's archive (1999–present) with optional section, tag, contributor, and date filters. Returns articles with full body text (HTML stripped, truncated at 2,000 words). |
-| `guardian_get_article` | Fetch a single Guardian article by its ID (path slug) with full body text and all metadata. Use after `guardian_search` to retrieve the complete untruncated text. |
-| `guardian_browse` | Browse The Guardian's content by section or tag, or discover available sections and tags. Four modes: `section_latest`, `tag_latest`, `list_sections`, `list_tags`. |
-
-### `guardian_search`
-
-Full-text search with structured filters across the entire Guardian archive.
-
-- Supports AND, OR, NOT boolean operators and exact phrases in double quotes
-- Filters: section ID, tag ID, contributor profile ID, date range (`from_date`, `to_date`)
-- Returns body text (HTML stripped) truncated at 2,000 words with a truncation flag — use `guardian_get_article` for complete text
-- Sort by `relevance` (default), `newest`, or `oldest`
-- Pagination via `page` + `page_size` (1–50 per page)
+| `guardian_search` | Full-text search across The Guardian's archive with optional section, tag, contributor, and date filters |
+| `guardian_get_article` | Fetch a single Guardian article by ID with full untruncated body text and metadata |
+| `guardian_browse` | Browse by section or tag, or discover available sections and tags, across four modes |
 
 ---
 
-### `guardian_get_article`
+## Capability reference
 
-Fetch one article by its Guardian path-slug ID.
+### `guardian_search` <sub>tool</sub>
 
-- Input: `article_id` from `guardian_search` results — the `id` field, e.g. `"world/2024/mar/01/ukraine-war-latest"`
+- Boolean query syntax (`AND`/`OR`/`NOT`, quoted phrases) plus optional `section`, `tag`, `contributor`, and `from_date`/`to_date` (`YYYY-MM-DD`) filters
+- Sort via `order_by`: `relevance` (default), `newest`, or `oldest`; paginated with `page` + `page_size` (1–50, default 10)
+- Body text is HTML-stripped and truncated at 2,000 words with a `truncated` flag — fetch the complete text via `guardian_get_article`
+- Typed error reasons: `unauthorized`, `no_results`, `invalid_date`, `api_error` (retryable)
+- Zero-result responses carry an enrichment notice echoing the query
+
+---
+
+### `guardian_get_article` <sub>tool</sub>
+
+- Input: `article_id` — the path-slug `id` field returned by `guardian_search` or `guardian_browse`
 - Returns complete untruncated body text (HTML stripped), full metadata, contributor list, and pillar/section classification
-- `truncated: true` in the response means the body still exceeded 2,000 words after fetching
+- `truncated: true` means the body still exceeded 2,000 words after the full fetch
+- Typed error reasons: `unauthorized`, `not_found`, `api_error` (retryable)
 
 ---
 
-### `guardian_browse`
+### `guardian_browse` <sub>tool</sub>
 
-Browse and discover Guardian content — four modes in one tool.
-
-- `section_latest`: newest articles from a section (requires `section_id`)
-- `tag_latest`: newest articles carrying a tag (requires `tag_id`)
-- `list_sections`: returns all Guardian sections as a flat list — use to discover valid `section_id` values
-- `list_tags`: searches the tag taxonomy with optional `query` and `tag_type` filter — use to discover contributor IDs (`tag_type=contributor`), keyword tags, series, and more
-- Pagination applies to all modes
+- Four modes via `mode`: `section_latest` (requires `section_id`), `tag_latest` (requires `tag_id`), `list_sections`, `list_tags`
+- `list_tags` takes optional `query` and `tag_type` (`keyword`, `contributor`, `blog`, `series`, `tone`, `type`, `publication`, `newspaper-book`, `newspaper-book-section`) — use `tag_type=contributor` to discover contributor IDs
+- Pagination via `page` + `page_size` (1–50, default 10) applies to every mode
+- Typed error reasons: `unauthorized`, `missing_section_id`, `missing_tag_id`, `section_not_found`, `tag_not_found`, `api_error` (retryable)
 
 ---
 
 ## Features
 
-Built on [`@cyanheads/mcp-ts-core`](https://www.npmjs.com/package/@cyanheads/mcp-ts-core):
-
-- Declarative tool definitions — single file per tool, framework handles registration and validation
-- Unified error handling — handlers throw, framework catches, classifies, and formats
-- Pluggable auth: `none`, `jwt`, `oauth`
-- Swappable storage backends: `in-memory`, `filesystem`, `Supabase`, `Cloudflare KV/R2/D1`
-- Structured logging with optional OpenTelemetry tracing
-- STDIO and Streamable HTTP transports
+Built on [`@cyanheads/mcp-ts-core`](https://github.com/cyanheads/mcp-ts-core): stdio and Streamable HTTP transports, pluggable auth (`none` / `jwt` / `oauth`), swappable storage (`in-memory`, `filesystem`, `Supabase`, `Cloudflare KV/R2/D1`), structured logging with optional OpenTelemetry tracing.
 
 Guardian-specific:
 
-- Wraps the [Guardian Open Platform API](https://open-platform.theguardian.com/) with a free developer key
+- Wraps the Guardian Open Platform API with a free non-commercial developer key
 - Full body text extraction — HTML stripped, not just headlines or abstracts
-- Contributor ID discovery via `guardian_browse` mode `list_tags` + `tag_type=contributor`
-- Section and tag taxonomy browsing for filter discovery before searching
-- Powered by The Guardian
+- Contributor ID discovery via `guardian_browse` mode `list_tags` with `tag_type=contributor`
+- Section and tag taxonomy browsing (`list_sections`, `list_tags`) for filter discovery before searching
+- Free tier: 5,000 requests/day, 12 calls/second — the server applies no additional throttling
 
 Agent-friendly output:
 
-- Truncation flags on every article — agents know whether to call `guardian_get_article` for the rest
-- Typed error reasons (`unauthorized`, `no_results`, `not_found`, `invalid_date`, `api_error`) with recovery hints for each case
-- `total`, `page`, and `pages` on all paginated responses so agents can communicate result scope
-- Zero-result enrichment notice on `guardian_search` — echoes the query and suggests how to broaden
+- Truncation flags on every article response — signal to call `guardian_get_article` for the rest
+- Typed error reasons across all three tools, each paired with a recovery hint
+- `total` / `page` / `pages` on every paginated response so callers can track result scope
+- Zero-result enrichment notice on `guardian_search` echoing the query and suggesting how to broaden
 
 ---
 
 ## Getting started
 
-> **A `GUARDIAN_API_KEY` is required.** Register for the free non-commercial developer key at [https://open-platform.theguardian.com/access](https://open-platform.theguardian.com/access).
-
-Add the following to your MCP client configuration file:
+Add the following to your MCP client configuration file. Register for a free Guardian Open Platform API key at [open-platform.theguardian.com/access](https://open-platform.theguardian.com/access).
 
 ```json
 {
@@ -171,8 +154,8 @@ MCP_TRANSPORT_TYPE=http MCP_HTTP_PORT=3010 GUARDIAN_API_KEY=your-api-key bun run
 
 ### Prerequisites
 
-- [Bun v1.3.0](https://bun.sh/) or higher (or Node.js v24+).
-- A free Guardian Open Platform API key — register at [https://open-platform.theguardian.com/access](https://open-platform.theguardian.com/access). The non-commercial developer tier is free and instant.
+- [Bun v1.4.0](https://bun.sh/) or higher (or Node.js v24+).
+- A free Guardian Open Platform API key — register at [open-platform.theguardian.com/access](https://open-platform.theguardian.com/access). The non-commercial developer tier is free and instant.
 
 ### Installation
 
@@ -210,6 +193,7 @@ cp .env.example .env
 | `GUARDIAN_API_KEY` | **Required.** Free developer key from [open-platform.theguardian.com/access](https://open-platform.theguardian.com/access). | — |
 | `MCP_TRANSPORT_TYPE` | Transport: `stdio` or `http`. | `stdio` |
 | `MCP_HTTP_PORT` | Port for HTTP server. | `3010` |
+| `MCP_SESSION_MODE` | HTTP session mode: `stateless`, `stateful`, or `auto` (resolves to `stateful`). The server declares `stateless`; an exported value overrides it. | `stateless` |
 | `MCP_AUTH_MODE` | Auth mode: `none`, `jwt`, or `oauth`. | `none` |
 | `MCP_LOG_LEVEL` | Log level (RFC 5424). | `info` |
 | `LOGS_DIR` | Directory for log files (Node.js only). | `<project-root>/logs` |
@@ -274,14 +258,14 @@ See [`CLAUDE.md`](./CLAUDE.md) / [`AGENTS.md`](./AGENTS.md) for development guid
 
 - Handlers throw, framework catches — no `try/catch` in tool logic
 - Use `ctx.log` for request-scoped logging, `ctx.state` for tenant-scoped storage
-- Register new tools via the barrel in `src/mcp-server/tools/definitions/index.ts`
+- Register new tools in the `createApp()` `tools` array in `src/index.ts`
 - Wrap external API calls: validate raw → normalize to domain type → return output schema; never fabricate missing fields
 
 ---
 
 ## Contributing
 
-Issues and pull requests are welcome. Run checks and tests before submitting:
+Issues are welcome. Run checks and tests before submitting:
 
 ```sh
 bun run devcheck
