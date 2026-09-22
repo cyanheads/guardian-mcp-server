@@ -3,8 +3,8 @@
     "command": "npx",
     "args": ["-y", "@cyanheads/guardian-mcp-server"],
     "env": {
-      "MCP_TRANSPORT_TYPE": "stdio",
-      "GUARDIAN_API_KEY": ""
-    }
+      "MCP_TRANSPORT_TYPE": "stdio"
+    },
+    "env_vars": ["GUARDIAN_API_KEY"]
   }
 }

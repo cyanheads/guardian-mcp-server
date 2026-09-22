@@ -19,7 +19,7 @@
         "MCP_TRANSPORT_TYPE": "stdio",
         "MCP_AUTH_MODE": "none",
         "NODE_ENV": "production",
-        "GUARDIAN_API_KEY": "${GUARDIAN_API_KEY}"
+        "GUARDIAN_API_KEY": "${user_config.GUARDIAN_API_KEY}"
       }
     }
   },
@@ -30,9 +30,10 @@
   "prompts_generated": true,
   "user_config": {
     "GUARDIAN_API_KEY": {
-      "title": "Guardian API Key",
-      "description": "API key for The Guardian Open Platform (https://open-platform.theguardian.com/).",
       "type": "string",
+      "title": "Guardian API key",
+      "description": "Required. Free non-commercial developer key from open-platform.theguardian.com/access.",
+      "sensitive": true,
       "required": true
     }
   }

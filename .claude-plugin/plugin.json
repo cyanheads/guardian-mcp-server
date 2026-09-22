@@ -1,20 +1,33 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "guardian-mcp-server",
   "version": "0.1.3",
   "description": "Search, browse, and retrieve full article text from The Guardian's journalism archive (1999–present) via MCP. STDIO or Streamable HTTP.",
   "author": {
-    "name": "cyanheads"
+    "name": "cyanheads",
+    "email": "casey@caseyjhand.com",
+    "url": "https://github.com/cyanheads"
   },
   "homepage": "https://github.com/cyanheads/guardian-mcp-server#readme",
   "repository": "https://github.com/cyanheads/guardian-mcp-server",
   "license": "Apache-2.0",
+  "keywords": ["guardian", "news", "journalism", "mcp", "mcp-server", "model-context-protocol"],
+  "userConfig": {
+    "GUARDIAN_API_KEY": {
+      "type": "string",
+      "title": "Guardian API key",
+      "description": "Required. Free non-commercial developer key from open-platform.theguardian.com/access.",
+      "sensitive": true,
+      "required": true
+    }
+  },
   "mcpServers": {
     "guardian-mcp-server": {
       "command": "npx",
       "args": ["-y", "@cyanheads/guardian-mcp-server"],
       "env": {
         "MCP_TRANSPORT_TYPE": "stdio",
-        "GUARDIAN_API_KEY": ""
+        "GUARDIAN_API_KEY": "${user_config.GUARDIAN_API_KEY}"
       }
     }
   }
