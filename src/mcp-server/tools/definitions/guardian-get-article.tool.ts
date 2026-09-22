@@ -70,6 +70,7 @@ export const guardianGetArticle = tool('guardian_get_article', {
       when: 'The Guardian API returned 401 — the API key is missing or invalid.',
       recovery:
         'Check that GUARDIAN_API_KEY is set correctly and the key is active at open-platform.theguardian.com.',
+      thrownBy: 'service',
     },
     {
       reason: 'not_found',
@@ -77,6 +78,7 @@ export const guardianGetArticle = tool('guardian_get_article', {
       when: 'No article exists with the given ID.',
       recovery:
         'Verify the article_id matches an id returned by guardian_search. IDs follow the pattern "section/YYYY/mon/DD/slug".',
+      thrownBy: 'service',
     },
     {
       reason: 'api_error',
@@ -84,6 +86,7 @@ export const guardianGetArticle = tool('guardian_get_article', {
       when: 'The Guardian API returned a non-OK status.',
       recovery: 'Retry after a short delay.',
       retryable: true,
+      thrownBy: 'service',
     },
   ],
 

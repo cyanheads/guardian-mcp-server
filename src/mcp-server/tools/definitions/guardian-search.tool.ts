@@ -161,6 +161,7 @@ export const guardianSearch = tool('guardian_search', {
       when: 'The Guardian API returned 401 — the API key is missing or invalid.',
       recovery:
         'Check that GUARDIAN_API_KEY is set correctly and the key is active at open-platform.theguardian.com.',
+      thrownBy: 'service',
     },
     {
       reason: 'no_results',
@@ -181,6 +182,7 @@ export const guardianSearch = tool('guardian_search', {
       recovery:
         'Retry after a short delay. If the error persists, the Guardian API may be degraded.',
       retryable: true,
+      thrownBy: 'service',
     },
   ],
 
