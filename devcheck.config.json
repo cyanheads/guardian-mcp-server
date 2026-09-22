@@ -17,6 +17,7 @@
   "skillVersions": {
     "ignore": ["maintenance"]
   },
+  "lint": {},
   "packaging": {
     "pluginManifests": true
   }

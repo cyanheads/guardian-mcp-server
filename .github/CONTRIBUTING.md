@@ -7,7 +7,7 @@ Open one from the **Issues** tab and pick the **Bug Report** or **Feature Reques
 - https://github.com/cyanheads/guardian-mcp-server/issues/new?template=bug_report.yml
 - https://github.com/cyanheads/guardian-mcp-server/issues/new?template=feature_request.yml
 
-PRs welcome; open an issue first for anything larger than a typo.
+Anything that fits neither can be a plain issue — a half-formed idea in your own words is fine.
 
 ## Server bug or framework bug?
 
@@ -39,8 +39,8 @@ Do the triage first — an unverified report costs more to read than it saves to
 
 Two workflows ship with this project:
 
-- [`skills/report-issue-local/SKILL.md`](../skills/report-issue-local/SKILL.md) — filing against this repo.
-- [`skills/report-issue-framework/SKILL.md`](../skills/report-issue-framework/SKILL.md) — filing against `mcp-ts-core` when you've isolated the bug to the framework.
+- [`framework-skills/report-issue-local/SKILL.md`](../framework-skills/report-issue-local/SKILL.md) — filing against this repo.
+- [`framework-skills/report-issue-framework/SKILL.md`](../framework-skills/report-issue-framework/SKILL.md) — filing against `mcp-ts-core` when you've isolated the bug to the framework.
 
 Read the relevant one before filing on a user's behalf.
 
