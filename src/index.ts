@@ -13,6 +13,7 @@ import { initGuardianService } from './services/guardian/guardian-service.js';
 await createApp({
   name: 'guardian-mcp-server',
   title: 'guardian-mcp-server',
+  sessionMode: 'stateless',
   tools: [guardianSearch, guardianGetArticle, guardianBrowse],
   resources: [],
   prompts: [],
