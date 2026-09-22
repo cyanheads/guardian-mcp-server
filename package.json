@@ -1,6 +1,6 @@
 {
   "name": "@cyanheads/guardian-mcp-server",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "mcpName": "io.github.cyanheads/guardian-mcp-server",
   "description": "Search, browse, and retrieve full article text from The Guardian's journalism archive (1999–present) via MCP. STDIO or Streamable HTTP.",
   "type": "module",

@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.1.4](changelog/0.1.x/0.1.4.md) — 2026-09-21
+
+Stateless HTTP sessions by default, a fixed HTML entity decoder, working GUARDIAN_API_KEY install manifests, and framework ^0.13.6 adoption.
+
 ## [0.1.3](changelog/0.1.x/0.1.3.md) — 2026-08-21
 
 Framework ^0.12.3 adoption on the SDK v2 runtime with recovery hints now transmitted on every error contract, TypeScript 7 with a split test typecheck, and Bun 1.4.0 images pinned to the build platform.
