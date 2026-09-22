@@ -35,7 +35,30 @@ const SHOW_FIELDS = 'body,headline,byline,thumbnail,wordcount,standfirst';
 // HTML stripping
 // ---------------------------------------------------------------------------
 
-/** Strip HTML tags and decode common entities from a string. */
+/** Named character references stripHtml decodes. A Map, so a reference name never reaches Object.prototype. */
+const NAMED_ENTITIES = new Map([
+  ['amp', '&'],
+  ['lt', '<'],
+  ['gt', '>'],
+  ['quot', '"'],
+  ['nbsp', ' '],
+  ['hellip', '…'],
+  ['mdash', '—'],
+  ['ndash', '–'],
+]);
+
+const ENTITY_PATTERN = /&(#[xX][0-9a-fA-F]+|#\d+|[a-zA-Z][a-zA-Z0-9]*);/g;
+
+/** Decode one character reference; an unknown name or out-of-range code point stays literal. */
+function decodeEntity(match: string, ref: string): string {
+  if (!ref.startsWith('#')) return NAMED_ENTITIES.get(ref) ?? match;
+  const codePoint = /^#x/i.test(ref)
+    ? Number.parseInt(ref.slice(2), 16)
+    : Number.parseInt(ref.slice(1), 10);
+  return codePoint > 0 && codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : match;
+}
+
+/** Strip HTML tags and decode entities from a string, each character reference exactly once. */
 function stripHtml(html: string): string {
   return (
     html
@@ -47,17 +70,8 @@ function stripHtml(html: string): string {
       .replace(/<br\s*\/?>/gi, '\n')
       // Strip remaining tags
       .replace(/<[^>]+>/g, '')
-      // Decode common HTML entities
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&hellip;/g, '…')
-      .replace(/&mdash;/g, '—')
-      .replace(/&ndash;/g, '–')
-      .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+      // Decode entities in one pass, so an `&` a decode produces is never decoded again
+      .replace(ENTITY_PATTERN, decodeEntity)
       // Collapse excess whitespace / blank lines
       .replace(/\n{3,}/g, '\n\n')
       .trim()

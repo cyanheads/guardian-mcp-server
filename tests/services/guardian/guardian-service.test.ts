@@ -164,8 +164,7 @@ describe('GuardianService', () => {
 
     it('truncates long bodies at 2000 words and appends a note', async () => {
       // 2100-word body
-      const longBody =
-        '<p>' + Array.from({ length: 2100 }, (_, i) => `word${i}`).join(' ') + '</p>';
+      const longBody = `<p>${Array.from({ length: 2100 }, (_, i) => `word${i}`).join(' ')}</p>`;
       const raw = {
         response: {
           status: 'ok',
@@ -340,6 +339,62 @@ describe('GuardianService', () => {
 
       expect(first(result.tags).section_id).toBeUndefined();
       expect(first(result.tags).section_name).toBeUndefined();
+    });
+  });
+
+  describe('HTML entity decoding', () => {
+    /** Fetch one article whose headline and body carry the given HTML fragment. */
+    async function decode(fragment: string): Promise<{ headline: string; body: string }> {
+      const raw = {
+        response: {
+          status: 'ok',
+          content: {
+            id: 'world/2024/jan/15/entities',
+            type: 'article',
+            sectionId: 'world',
+            sectionName: 'World news',
+            webPublicationDate: '2024-01-15T12:00:00Z',
+            webUrl: 'https://www.theguardian.com/world/2024/jan/15/entities',
+            apiUrl: 'https://content.guardianapis.com/world/2024/jan/15/entities',
+            fields: { headline: fragment, body: `<p>${fragment}</p>` },
+            tags: [],
+          },
+        },
+      };
+      vi.mocked(fetchWithTimeout).mockResolvedValueOnce(makeResponse(JSON.stringify(raw)));
+      const article = await svc.getContent('world/2024/jan/15/entities', createMockContext());
+      return { headline: article.headline, body: article.body as string };
+    }
+
+    it('decodes each supported named and decimal reference once', async () => {
+      const { headline, body } = await decode(
+        'Tom &amp; Jerry &lt;b&gt; &quot;q&quot; it&#39;s a&nbsp;b wait&hellip; x&mdash;y 1&ndash;2 don&#8217;t',
+      );
+      const expected = 'Tom & Jerry <b> "q" it\'s a b wait… x—y 1–2 don’t';
+      expect(headline).toBe(expected);
+      expect(body).toBe(expected);
+    });
+
+    it('decodes an escaped entity to its literal text, not a second time (#10)', async () => {
+      const { headline, body } = await decode('&amp;lt;b&amp;gt; &amp;amp; &amp;#39; &amp;quot;');
+      const expected = '&lt;b&gt; &amp; &#39; &quot;';
+      expect(headline).toBe(expected);
+      expect(body).toBe(expected);
+    });
+
+    it('decodes hexadecimal and astral-plane numeric references', async () => {
+      const { body } = await decode('don&#x2019;t &#X2019; &#128512; &#x1F600;');
+      expect(body).toBe('don’t ’ 😀 😀');
+    });
+
+    it('leaves out-of-range numeric references literal', async () => {
+      const { body } = await decode('&#0; &#x110000; &#99999999999;');
+      expect(body).toBe('&#0; &#x110000; &#99999999999;');
+    });
+
+    it('leaves unknown names and Object.prototype member names literal', async () => {
+      const { body } = await decode('&copy; &constructor; &toString; &__proto__; &hasOwnProperty;');
+      expect(body).toBe('&copy; &constructor; &toString; &__proto__; &hasOwnProperty;');
     });
   });
 
