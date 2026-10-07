@@ -15,7 +15,7 @@
   "interface": {
     "displayName": "guardian-mcp-server",
     "shortDescription": "Search, browse, and retrieve full article text from The Guardian's journalism archive (1999–present) via MCP. STDIO or Streamable HTTP.",
-    "longDescription": "guardian-mcp-server puts The Guardian's journalism archive (1999–present) behind MCP. guardian_search runs full-text search across the archive with section, tag, contributor, and date filters, returning articles with body text; guardian_browse walks the paper's structure — latest articles for a section or tag, plus discovery modes listing the available sections and tags to use as filters; guardian_get_article fetches a single article by ID with complete, untruncated body text and metadata. Powered by the Guardian Open Platform (open-platform.theguardian.com).",
+    "longDescription": "guardian-mcp-server puts The Guardian's journalism archive (1999–present) behind MCP. guardian_search runs full-text search across the archive with section, tag, contributor, and date filters, returning articles with body text; guardian_browse walks the paper's structure — latest articles for a section or tag, plus discovery modes listing the available sections and tags to use as filters; guardian_get_article fetches a single article by ID with body text and metadata. Article bodies are capped at 2,000 words; read the article's web_url for the full text. Powered by the Guardian Open Platform (open-platform.theguardian.com).",
     "developerName": "cyanheads",
     "category": "News & Media",
     "capabilities": ["Read"],

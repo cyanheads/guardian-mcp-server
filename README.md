@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.1.4-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/guardian-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-%5E2.0.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/guardian-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/guardian-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-%5E7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.1.4-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/guardian-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-%5E2.2.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/guardian-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/guardian-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-%5E7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.2-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -23,14 +23,14 @@
 
 ## Overview
 
-The Guardian's journalism archive (1999–present), via the Guardian Open Platform API. Search full text, browse by section or tag, and fetch complete untruncated articles from any MCP client. Runs as a stdio process or a local Streamable HTTP server.
+The Guardian's journalism archive (1999–present), via the Guardian Open Platform API. Search full text, browse by section or tag, and fetch individual articles from any MCP client. Runs as a stdio process or a local Streamable HTTP server.
 
 ### Tools
 
 | Tool | Description |
 |:-----|:------------|
 | `guardian_search` | Full-text search across The Guardian's archive with optional section, tag, contributor, and date filters |
-| `guardian_get_article` | Fetch a single Guardian article by ID with full untruncated body text and metadata |
+| `guardian_get_article` | Fetch a single Guardian article by ID with body text and metadata |
 | `guardian_browse` | Browse by section or tag, or discover available sections and tags, across four modes |
 
 ---
@@ -39,28 +39,24 @@ The Guardian's journalism archive (1999–present), via the Guardian Open Platfo
 
 ### `guardian_search` <sub>tool</sub>
 
-- Boolean query syntax (`AND`/`OR`/`NOT`, quoted phrases) plus optional `section`, `tag`, `contributor`, and `from_date`/`to_date` (`YYYY-MM-DD`) filters
-- Sort via `order_by`: `relevance` (default), `newest`, or `oldest`; paginated with `page` + `page_size` (1–50, default 10)
-- Body text is HTML-stripped and truncated at 2,000 words with a `truncated` flag — fetch the complete text via `guardian_get_article`
+- Boolean `query` syntax (`AND`/`OR`/`NOT`, quoted phrases), optional `section`/`tag`/`contributor` and `from_date`/`to_date` (`YYYY-MM-DD`) filters; `order_by`: `relevance` (default), `newest`, or `oldest`; `page` + `page_size` (1–50, default 10)
+- Articles carry metadata, HTML-stripped body text and a `truncated` flag; results include `total`, `page`, `pages`, `page_size`, and `order_by`
 - Typed error reasons: `unauthorized`, `no_results`, `invalid_date`, `api_error` (retryable)
-- Zero-result responses carry an enrichment notice echoing the query
 
 ---
 
 ### `guardian_get_article` <sub>tool</sub>
 
-- Input: `article_id` — the path-slug `id` field returned by `guardian_search` or `guardian_browse`
-- Returns complete untruncated body text (HTML stripped), full metadata, contributor list, and pillar/section classification
-- `truncated: true` means the body still exceeded 2,000 words after the full fetch
+- Required `article_id`: the path-slug `id` returned by `guardian_search` or `guardian_browse`
+- Returns HTML-stripped body text, metadata, contributors, pillar/section classification, and `truncated`
 - Typed error reasons: `unauthorized`, `not_found`, `api_error` (retryable)
 
 ---
 
 ### `guardian_browse` <sub>tool</sub>
 
-- Four modes via `mode`: `section_latest` (requires `section_id`), `tag_latest` (requires `tag_id`), `list_sections`, `list_tags`
-- `list_tags` takes optional `query` and `tag_type` (`keyword`, `contributor`, `blog`, `series`, `tone`, `type`, `publication`, `newspaper-book`, `newspaper-book-section`) — use `tag_type=contributor` to discover contributor IDs
-- Pagination via `page` + `page_size` (1–50, default 10) applies to every mode
+- Four `mode` values: `section_latest` (requires `section_id`), `tag_latest` (requires `tag_id`), `list_sections`, `list_tags`; `page` + `page_size` (1–50, default 10) for articles and tags
+- `list_tags` filters by optional `query` and `tag_type` (`keyword`, `contributor`, `blog`, `series`, `tone`, `type`, `publication`, `newspaper-book`, `newspaper-book-section`); output carries `mode`, `total`, and the matching `results`/`sections`/`tags` array
 - Typed error reasons: `unauthorized`, `missing_section_id`, `missing_tag_id`, `section_not_found`, `tag_not_found`, `api_error` (retryable)
 
 ---
@@ -79,10 +75,10 @@ Guardian-specific:
 
 Agent-friendly output:
 
-- Truncation flags on every article response — signal to call `guardian_get_article` for the rest
+- Article bodies are capped at 2,000 words across all three tools; `truncated: true` signals a cut. Read the article's `web_url` for the full text.
 - Typed error reasons across all three tools, each paired with a recovery hint
 - `total` / `page` / `pages` on every paginated response so callers can track result scope
-- Zero-result enrichment notice on `guardian_search` echoing the query and suggesting how to broaden
+- Declared recovery hints on error responses, with a request ID for matching server logs
 
 ---
 
@@ -197,8 +193,11 @@ cp .env.example .env
 | `MCP_AUTH_MODE` | Auth mode: `none`, `jwt`, or `oauth`. | `none` |
 | `MCP_LOG_LEVEL` | Log level (RFC 5424). | `info` |
 | `LOGS_DIR` | Directory for log files (Node.js only). | `<project-root>/logs` |
+| `LOG_TOOL_FAILURE_PAYLOADS` | Log failed tool arguments and results, redacted by key name and capped by `LOG_TOOL_FAILURE_PAYLOAD_MAX_BYTES` (default `16384`). Secrets in free-form values remain visible. | `false` |
 | `STORAGE_PROVIDER_TYPE` | Storage backend. | `in-memory` |
 | `OTEL_ENABLED` | Enable [OpenTelemetry instrumentation](https://github.com/cyanheads/mcp-ts-core/tree/main/docs/telemetry) (spans, metrics, completion logs). | `false` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Base OTLP URL; traces use `/v1/traces`, metrics use `/v1/metrics`. | — |
+| `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` | Opt-in OTLP log endpoint, used as-is. | — |
 
 See [`.env.example`](./.env.example) for the full list of optional overrides.
 

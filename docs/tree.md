@@ -1,6 +1,6 @@
 # guardian-mcp-server - Directory Structure
 
-Generated on: 2026-09-22 03:52:02
+Generated on: 2026-10-07 22:22:22
 
 ```text
 guardian-mcp-server/
@@ -127,9 +127,11 @@ guardian-mcp-server/
 │   ├── clean-mcpb.ts
 │   ├── clean.ts
 │   ├── devcheck.ts
+│   ├── install-otel.ts
 │   ├── lint-mcp.ts
 │   ├── lint-packaging.ts
 │   ├── list-skills.ts
+│   ├── prune-musl-packages.ts
 │   ├── release-github.ts
 │   └── tree.ts
 ├── src/
