@@ -5,6 +5,7 @@
  */
 
 import { createApp } from '@cyanheads/mcp-ts-core';
+import { getServerConfig } from './config/server-config.js';
 import { guardianBrowse } from './mcp-server/tools/definitions/guardian-browse.tool.js';
 import { guardianGetArticle } from './mcp-server/tools/definitions/guardian-get-article.tool.js';
 import { guardianSearch } from './mcp-server/tools/definitions/guardian-search.tool.js';
@@ -24,6 +25,7 @@ await createApp({
     'Rate limits: 5,000 requests/day, 12 calls/sec (free tier). Powered by The Guardian.',
 
   setup(core) {
+    getServerConfig();
     initGuardianService();
     core.logger.info('GuardianService initialized');
   },

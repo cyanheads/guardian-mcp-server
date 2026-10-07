@@ -179,16 +179,11 @@ function redactApiKey(message: string): string {
 
 /**
  * Annotate a caught McpError from fetchWithTimeout with a contract reason so
- * tool handlers get `data.reason` populated. Resolves the calling tool's
- * declared recovery hint via `ctx.recoveryFor` ({} when the reason isn't in
- * the caller's contract). Always redacts the API key from the message before
+ * tool handlers get `data.reason` populated. The framework fills the calling
+ * tool's declared recovery hint. Always redacts the API key from the message before
  * rethrowing, even when the error already carries a reason.
  */
-function annotateHttpError(
-  err: unknown,
-  ctx: Context,
-  opts: { notFoundReason?: string } = {},
-): never {
+function annotateHttpError(err: unknown, opts: { notFoundReason?: string } = {}): never {
   if (!(err instanceof McpError)) throw err;
 
   const safeMessage = redactApiKey(err.message);
@@ -206,21 +201,18 @@ function annotateHttpError(
     throw new McpError(JsonRpcErrorCode.Unauthorized, safeMessage, {
       ...(err.data as object | undefined),
       reason: 'unauthorized',
-      ...ctx.recoveryFor('unauthorized'),
     });
   }
   if (status === 404 && opts.notFoundReason) {
     throw new McpError(JsonRpcErrorCode.NotFound, safeMessage, {
       ...(err.data as object | undefined),
       reason: opts.notFoundReason,
-      ...ctx.recoveryFor(opts.notFoundReason),
     });
   }
   // All other non-OK statuses map to api_error
   throw new McpError(err.code, safeMessage, {
     ...(err.data as object | undefined),
     reason: 'api_error',
-    ...ctx.recoveryFor('api_error'),
   });
 }
 
@@ -286,7 +278,7 @@ export class GuardianService {
         baseDelayMs: 500,
         signal: ctx.signal,
       },
-    ).catch((err) => annotateHttpError(err, ctx));
+    ).catch((err) => annotateHttpError(err));
   }
 
   /** Fetch a single article by its path-slug ID. */
@@ -310,7 +302,7 @@ export class GuardianService {
         baseDelayMs: 500,
         signal: ctx.signal,
       },
-    ).catch((err) => annotateHttpError(err, ctx, { notFoundReason: 'not_found' }));
+    ).catch((err) => annotateHttpError(err, { notFoundReason: 'not_found' }));
   }
 
   /** Fetch latest content from a section ID. */
@@ -349,7 +341,7 @@ export class GuardianService {
         baseDelayMs: 500,
         signal: ctx.signal,
       },
-    ).catch((err) => annotateHttpError(err, ctx, { notFoundReason: 'section_not_found' }));
+    ).catch((err) => annotateHttpError(err, { notFoundReason: 'section_not_found' }));
   }
 
   /** Fetch all Guardian sections, optionally filtering by query. */
@@ -378,7 +370,7 @@ export class GuardianService {
         baseDelayMs: 500,
         signal: ctx.signal,
       },
-    ).catch((err) => annotateHttpError(err, ctx));
+    ).catch((err) => annotateHttpError(err));
   }
 
   /** Search the Guardian tag taxonomy. */
@@ -430,7 +422,7 @@ export class GuardianService {
         baseDelayMs: 500,
         signal: ctx.signal,
       },
-    ).catch((err) => annotateHttpError(err, ctx));
+    ).catch((err) => annotateHttpError(err));
   }
 }
 
