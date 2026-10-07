@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.3",
   "name": "guardian-mcp-server",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "license": "Apache-2.0",
   "description": "Search, browse, and retrieve full article text from The Guardian's journalism archive (1999–present) via MCP. STDIO or Streamable HTTP.",
   "author": {

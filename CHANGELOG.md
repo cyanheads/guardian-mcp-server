@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.1.5](changelog/0.1.x/0.1.5.md) — 2026-10-07
+
+Framework 0.13.13 adoption, startup configuration validation, and native multi-architecture Docker builds.
+
 ## [0.1.4](changelog/0.1.x/0.1.4.md) — 2026-09-21
 
 Stateless HTTP sessions by default, a fixed HTML entity decoder, working GUARDIAN_API_KEY install manifests, and framework ^0.13.6 adoption.
