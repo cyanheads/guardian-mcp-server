@@ -1,6 +1,6 @@
 # guardian-mcp-server - Directory Structure
 
-Generated on: 2026-10-16 14:02:06
+Generated on: 2026-10-16 14:14:52
 
 ```text
 guardian-mcp-server/
@@ -25,6 +25,7 @@ guardian-mcp-server/
 │   └── settings.json
 ├── changelog/
 │   ├── 0.1.x/
+│   ├── 0.2.x/
 │   └── template.md
 ├── docs/
 │   ├── design.md
