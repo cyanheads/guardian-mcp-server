@@ -2,10 +2,10 @@
 
 **Server:** @cyanheads/guardian-mcp-server
 **Version:** 0.1.5
-**Framework:** [@cyanheads/mcp-ts-core](https://www.npmjs.com/package/@cyanheads/mcp-ts-core) `0.13.13`
+**Framework:** [@cyanheads/mcp-ts-core](https://www.npmjs.com/package/@cyanheads/mcp-ts-core) `^0.13.15`
 **Engines:** Bun ≥1.4.0, Node ≥24.0.0
-**MCP SDK:** `@modelcontextprotocol/server` ^2.2.0
-**Zod:** ^4.6.5
+**MCP SDK:** `@modelcontextprotocol/server` ^2.3.1
+**Zod:** ^4.6.7
 
 > **Read the framework docs first:** `node_modules/@cyanheads/mcp-ts-core/CLAUDE.md` contains the full API reference — builders, Context, error codes, exports, patterns. This file covers server-specific conventions only.
 
@@ -50,7 +50,7 @@ Tailor suggestions to what's actually missing or stale — don't recite the full
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { getGuardianService } from '@/services/guardian/guardian-service.js';
 
-export const guardianSearch = tool('guardian_search', {
+export const guardianSearchArticles = tool('guardian_search_articles', {
   description:
     "Full-text search across The Guardian's archive (1999–present) with optional section, tag, " +
     'contributor, and date filters. Returns articles with full body text (HTML stripped, truncated ' +
@@ -219,7 +219,9 @@ Handlers throw — the framework catches, classifies, and formats.
 
 **Recommended: typed error contract.** Declare `errors: [{ reason, code, when, recovery, retryable?, severity?, thrownBy? }]` on `tool()` / `resource()` to receive `ctx.fail(reason, …)` typed against the reason union. TypeScript catches typos at compile time, `data.reason` is auto-populated for observability, linter enforces conformance against the handler body. `recovery` is required (≥ 5 words, lint-validated) — the single source of truth for the agent's next move. The framework puts it on the wire whenever a failure carrying that `reason` arrives without a hint — a bare `ctx.fail('reason')` or a service throw with `data: { reason }` — as `data.recovery.hint`, mirrored into `content[]` text unless the message already contains it verbatim; override with an explicit `{ recovery: { hint: '...' } }` when dynamic runtime context matters. Every error envelope also carries `data.requestId`, the id the server's log records for that call carry, and `content[]` closes with `(reason … · request <id>)`. Mark an entry the service layer throws with `thrownBy: 'service'` so `error-contract-unthrown` skips it — lint-only metadata, nothing at runtime reads it. Baseline codes (`InternalError`, `ServiceUnavailable`, `Timeout`, `ValidationError`, `SerializationError`, `RequestCancelled`) bubble freely and don't need declaring.
 
-In this server, `GuardianService`'s `annotateHttpError` raises `unauthorized`, `api_error`, and the not-found reason each call site hands it (`not_found`, `section_not_found`) — every tool declaring one of those marks it `thrownBy: 'service'`. A reason the handler throws itself with a literal `ctx.fail('<reason>'` stays unmarked.
+In this server, `GuardianService`'s `annotateHttpError` preserves HTTP-specific codes and emits authored Guardian messages with canonical `status`/`body` diagnostics and explicit retryability. Deterministic failures carry parameter/configuration recovery; 408/425/429 and retryable 5xx retain transient guidance, while 501 is nonretryable. The tool contracts declare each service reason inline with `thrownBy: 'service'`; contracts fill recovery only, not retryability. Article and section 404 retain `not_found` and `section_not_found`. A reason the handler throws itself with a literal `ctx.fail('<reason>'` stays unmarked.
+
+Search and article-returning browse modes cap bodies at 2,000 words and render each article's explicit `truncated` state. `guardian_get_article` accepts `article_id` and returns complete HTML-stripped text without a word cap. Calendar-date bounds are validated locally; tag boolean expressions pass through unchanged and are comma-joined with contributor filters.
 
 ```ts
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
@@ -267,9 +269,9 @@ src/
       types.ts                          # Guardian domain types
   mcp-server/
     tools/definitions/
-      guardian-search.tool.ts           # guardian_search
+      guardian-search-articles.tool.ts           # guardian_search_articles
       guardian-get-article.tool.ts      # guardian_get_article
-      guardian-browse.tool.ts           # guardian_browse
+      guardian-browse-content.tool.ts           # guardian_browse_content
 ```
 
 ---
@@ -278,8 +280,8 @@ src/
 
 | What | Convention | Example |
 |:-----|:-----------|:--------|
-| Files | kebab-case with suffix | `guardian-search.tool.ts` |
-| Tool/resource/prompt names | snake_case | `guardian_search` |
+| Files | kebab-case with suffix | `guardian-search-articles.tool.ts` |
+| Tool/resource/prompt names | snake_case | `guardian_search_articles` |
 | Directories | kebab-case | `src/services/guardian/` |
 | Descriptions | Single string or template literal, no `+` concatenation | `'Search The Guardian archive by query and filter.'` |
 

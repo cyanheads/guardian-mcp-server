@@ -66,6 +66,32 @@ describe('GuardianService', () => {
   });
 
   describe('search', () => {
+    it('returns the complete single article beyond the batch preview cap', async () => {
+      const body = `<p>${Array.from({ length: 2100 }, (_, i) => `word${i}`).join(' ')} ending</p>`;
+      vi.mocked(fetchWithTimeout).mockResolvedValueOnce(
+        makeResponse(
+          JSON.stringify({ response: { content: { id: 'world/test', fields: { body } } } }),
+        ),
+      );
+      const article = await svc.getContent('world/test', createMockContext());
+      expect(article.body).toContain('word2099 ending');
+      expect(article.truncated).toBe(false);
+      expect(article.body).not.toContain('[Article truncated');
+    });
+    it('preserves grouped boolean tags when combining contributor filters', async () => {
+      vi.mocked(fetchWithTimeout).mockResolvedValueOnce(
+        makeResponse(
+          JSON.stringify({ response: { total: 0, currentPage: 1, pages: 0, results: [] } }),
+        ),
+      );
+      const tag = '(environment/climate-crisis|environment/flooding)-type/video';
+      await svc.search(
+        { query: '', tag, contributor: 'profile/georgemonbiot' },
+        createMockContext(),
+      );
+      const url = new URL(String(vi.mocked(fetchWithTimeout).mock.calls[0]?.[0]));
+      expect(url.searchParams.get('tag')).toBe(`${tag},profile/georgemonbiot`);
+    });
     it('normalizes a standard search result', async () => {
       const raw = {
         response: {
@@ -474,7 +500,7 @@ describe('GuardianService', () => {
       const mcpError = error as McpError;
       expect(mcpError.data).toMatchObject({ reason: 'already_set' });
       expect(mcpError.message).not.toContain('leaked-key');
-      expect(mcpError.message).toContain('[REDACTED]');
+      expect(mcpError.message).toBe('Guardian API temporarily unavailable (HTTP 503).');
     });
 
     it('annotates 404 on getSectionContent with reason="section_not_found"', async () => {
@@ -506,7 +532,7 @@ describe('GuardianService', () => {
       expect(error).toBeInstanceOf(McpError);
       const msg = (error as McpError).message;
       expect(msg).not.toContain('my-secret-key');
-      expect(msg).toContain('[REDACTED]');
+      expect(msg).toBe('Guardian API authentication failed. Check GUARDIAN_API_KEY.');
     });
   });
 });

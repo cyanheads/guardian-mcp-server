@@ -181,10 +181,10 @@ describe('guardianGetArticle', () => {
       expect(text).toContain(sampleArticle.body);
     });
 
-    it('notes truncation when truncated is true', () => {
-      const truncated = { ...sampleArticle, truncated: true };
-      const text = textOf(guardianGetArticle.format!(truncated as never));
-      expect(text).toContain('truncated');
+    it('renders the explicit false truncation state', () => {
+      const text = textOf(guardianGetArticle.format!(sampleArticle));
+      expect(text).toContain('**Truncated:** false');
+      expect(text).not.toContain('2,000');
     });
   });
 });

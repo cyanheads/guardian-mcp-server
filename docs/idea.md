@@ -29,33 +29,19 @@ Single REST API, key required (free tier, non-commercial). 5,000 req/day, 12 cal
 
 The `show-fields` parameter is what makes this API stand out — `body,headline,byline,thumbnail,wordcount,standfirst` returns a rich content object. Without it, responses are metadata only. Request the full fields by default.
 
-## Tool Surface (sketch)
+## Tool Surface
 
 ```
-guardian_search      — primary search tool. Query + optional filters: section, tags,
-                       contributor, date_from, date_to, page, page_size.
-                       Returns results with full article body when requested.
-                       Includes headline, byline, section, publication date, word count,
-                       standfirst (subheading), thumbnail URL, and article ID for
-                       follow-up. Faceted response includes total result count.
-                       Default: includes body text — this is the value-add.
+guardian_search_articles — query plus optional section, tag, contributor, from_date,
+                           to_date, order_by, page, and page_size filters. Returns
+                           metadata and capped body previews with article IDs.
 
-guardian_get_article — fetch a single article by its Guardian ID (path slug).
-                       Returns full metadata + body. Use when the agent has an ID
-                       from search results and wants the complete article.
+guardian_get_article     — article_id selects one complete HTML-stripped article
+                           with metadata and no word cap.
 
-guardian_browse      — latest content by section or tag. Mode:
-                       'section' — latest from a named section (world, politics,
-                         science, environment, technology, culture, sport, lifeandstyle)
-                       'tag' — latest for a specific tag (e.g. 'climate-crisis',
-                         'artificial-intelligence', 'ukraine')
-                       Returns most recent N articles with body.
-                       Entry point for "what's The Guardian saying about X lately?"
-
-guardian_list_tags   — search the tag taxonomy. Useful for discovering valid tag
-                       strings before filtering guardian_search. Returns tags with
-                       their section and type (keyword, contributor, series, tone).
-                       Also surfaces contributor profiles (byline metadata).
+guardian_browse_content  — section_latest and tag_latest return capped previews;
+                           list_sections and list_tags discover valid filter IDs.
+                           list_tags with tag_type=contributor finds author profiles.
 ```
 
 ## Design Notes
@@ -63,9 +49,9 @@ guardian_list_tags   — search the tag taxonomy. Useful for discovering valid t
 - Low complexity — clean REST API, one key, well-documented. Fast build.
 - The `show-fields=body` parameter is the entire point. Every tool that returns articles should request it by default; only omit for list/browse endpoints where the caller explicitly wants metadata only.
 - Output format: structured markdown per article — headline, byline, section, date, then the body. The Guardian body is clean HTML; strip tags before returning.
-- `guardian_browse` with section/tag modes collapses what could be multiple endpoint-specific tools into one. An enum on `mode` keeps the surface minimal.
-- Tags are the filtering backbone — `guardian_list_tags` prevents bad filter values and surfaces the contributor graph.
-- Rate limit is generous (5K/day) but full-body responses are large. Truncate long articles (>2K words) with an explicit truncation note to keep context usage reasonable.
+- `guardian_browse_content` with section/tag modes collapses what could be multiple endpoint-specific tools into one. An enum on `mode` keeps the surface minimal.
+- Tags are the filtering backbone — `guardian_browse_content` with `mode=list_tags` discovers valid IDs and contributor profiles.
+- Search and browse previews cap long bodies at 2,000 words with an explicit truncation state and continuation naming `article_id`. Single-article retrieval returns complete HTML-stripped text without a word cap.
 - **Attribution required:** "Powered by The Guardian" with a link, in tool descriptions and README.
 - **Licensing:** the free key is non-commercial only (and a commercial license is a separate tier) — note this in the README. The server itself runs against the live API with a caller-supplied key.
 - Composes naturally with `wikipedia` (background on topics surfaced in articles) and `gdelt` (event data to cross-reference coverage).

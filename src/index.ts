@@ -6,22 +6,23 @@
 
 import { createApp } from '@cyanheads/mcp-ts-core';
 import { getServerConfig } from './config/server-config.js';
-import { guardianBrowse } from './mcp-server/tools/definitions/guardian-browse.tool.js';
+import { guardianBrowseContent } from './mcp-server/tools/definitions/guardian-browse-content.tool.js';
 import { guardianGetArticle } from './mcp-server/tools/definitions/guardian-get-article.tool.js';
-import { guardianSearch } from './mcp-server/tools/definitions/guardian-search.tool.js';
+import { guardianSearchArticles } from './mcp-server/tools/definitions/guardian-search-articles.tool.js';
 import { initGuardianService } from './services/guardian/guardian-service.js';
 
 await createApp({
   name: 'guardian-mcp-server',
   title: 'guardian-mcp-server',
   sessionMode: 'stateless',
-  tools: [guardianSearch, guardianGetArticle, guardianBrowse],
+  tools: [guardianSearchArticles, guardianGetArticle, guardianBrowseContent],
   resources: [],
   prompts: [],
   instructions:
     "Guardian Open Platform MCP server. Provides full article text — not just headlines — from The Guardian's archive (1999–present). " +
     'GUARDIAN_API_KEY is required (free non-commercial key at open-platform.theguardian.com). ' +
-    'Typical workflows: guardian_search for archive search → guardian_get_article for full text; guardian_browse mode=list_sections or list_tags to discover valid filter IDs. ' +
+    'Typical workflows: guardian_search_articles for archive search → guardian_get_article for full text; guardian_browse_content mode=list_sections or list_tags to discover valid filter IDs. ' +
+    'Search and browse return 2,000-word previews; guardian_get_article returns complete text using article_id. ' +
     'Rate limits: 5,000 requests/day, 12 calls/sec (free tier). Powered by The Guardian.',
 
   setup(core) {

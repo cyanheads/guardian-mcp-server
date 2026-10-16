@@ -92,7 +92,7 @@ function truncateBody(text: string, articleId: string): { body: string; truncate
   return {
     body:
       truncated +
-      `\n\n[Article truncated at 2,000 words. Use guardian_get_article with id "${articleId}" to retrieve the full text.]`,
+      `\n\n[Article truncated at 2,000 words. Use guardian_get_article with article_id "${articleId}" to retrieve the full text.]`,
     truncated: true,
   };
 }
@@ -106,7 +106,10 @@ function normalizeContributors(tags?: RawTag[]): Array<{ id: string; name: strin
   return tags.filter((t) => t.type === 'contributor').map((t) => ({ id: t.id, name: t.webTitle }));
 }
 
-function normalizeArticle(raw: RawContentItem | RawSingleContent): NormalizedArticle {
+function normalizeArticle(
+  raw: RawContentItem | RawSingleContent,
+  preview = true,
+): NormalizedArticle {
   const fields = raw.fields ?? {};
 
   const rawHeadlineStr = fields.headline ?? '';
@@ -121,7 +124,9 @@ function normalizeArticle(raw: RawContentItem | RawSingleContent): NormalizedArt
   let body: string | undefined;
   let truncated = false;
   if (strippedBody) {
-    const result = truncateBody(strippedBody, raw.id);
+    const result = preview
+      ? truncateBody(strippedBody, raw.id)
+      : { body: strippedBody, truncated: false };
     body = result.body;
     truncated = result.truncated;
   }
@@ -185,34 +190,73 @@ function redactApiKey(message: string): string {
  */
 function annotateHttpError(err: unknown, opts: { notFoundReason?: string } = {}): never {
   if (!(err instanceof McpError)) throw err;
-
-  const safeMessage = redactApiKey(err.message);
-
-  // Already has a reason — rethrow with redacted message only
-  if (typeof (err.data as Record<string, unknown> | undefined)?.reason === 'string') {
-    throw new McpError(err.code, safeMessage, err.data as Record<string, unknown> | undefined);
-  }
-
-  const status = (err.data as Record<string, unknown> | undefined)?.statusCode as
-    | number
-    | undefined;
-
-  if (status === 401) {
-    throw new McpError(JsonRpcErrorCode.Unauthorized, safeMessage, {
-      ...(err.data as object | undefined),
-      reason: 'unauthorized',
+  const data = err.data;
+  const status = data?.status ?? data?.statusCode;
+  if (typeof status !== 'number') {
+    const reason =
+      data?.reason ??
+      (err.code === JsonRpcErrorCode.ServiceUnavailable
+        ? 'api_error'
+        : err.code === JsonRpcErrorCode.Timeout
+          ? 'api_timeout'
+          : undefined);
+    throw new McpError(err.code, redactApiKey(err.message), {
+      ...data,
+      ...(reason !== undefined && { reason }),
+      ...(data?.reason === undefined && reason !== undefined && { retryable: true }),
     });
   }
-  if (status === 404 && opts.notFoundReason) {
-    throw new McpError(JsonRpcErrorCode.NotFound, safeMessage, {
-      ...(err.data as object | undefined),
-      reason: opts.notFoundReason,
-    });
-  }
-  // All other non-OK statuses map to api_error
-  throw new McpError(err.code, safeMessage, {
-    ...(err.data as object | undefined),
-    reason: 'api_error',
+  const families: Partial<Record<JsonRpcErrorCode, string>> = {
+    [JsonRpcErrorCode.InvalidParams]: 'request_rejected',
+    [JsonRpcErrorCode.Unauthorized]: 'unauthorized',
+    [JsonRpcErrorCode.Forbidden]: 'access_denied',
+    [JsonRpcErrorCode.NotFound]: 'request_not_found',
+    [JsonRpcErrorCode.InvalidRequest]: 'invalid_request',
+    [JsonRpcErrorCode.Conflict]: 'request_conflict',
+    [JsonRpcErrorCode.ValidationError]: 'validation_failed',
+    [JsonRpcErrorCode.Timeout]: 'api_timeout',
+    [JsonRpcErrorCode.RateLimited]: 'rate_limited',
+    [JsonRpcErrorCode.ServiceUnavailable]: 'api_error',
+  };
+  const reason =
+    typeof data?.reason === 'string'
+      ? data.reason
+      : status === 404 && opts.notFoundReason
+        ? opts.notFoundReason
+        : status === 501
+          ? 'api_unsupported'
+          : families[err.code];
+  const retryable =
+    status !== 501 &&
+    [
+      JsonRpcErrorCode.Timeout,
+      JsonRpcErrorCode.RateLimited,
+      JsonRpcErrorCode.ServiceUnavailable,
+    ].includes(err.code);
+  const message =
+    reason === 'not_found'
+      ? 'Guardian article not found. Verify the article_id.'
+      : reason === 'section_not_found'
+        ? 'Guardian section not found. Verify the section_id.'
+        : status === 401
+          ? 'Guardian API authentication failed. Check GUARDIAN_API_KEY.'
+          : status === 403
+            ? 'Guardian API access denied. Check the API key permissions and access limits.'
+            : retryable
+              ? `Guardian API temporarily unavailable (HTTP ${status}).`
+              : status === 501
+                ? 'Guardian API does not support this request (HTTP 501).'
+                : `Guardian API rejected the request (HTTP ${status}). Check the parameters and requested page.`;
+  const body = data?.body ?? data?.responseBody;
+  throw new McpError(err.code, message, {
+    status,
+    ...(typeof body === 'string' && {
+      body: redactApiKey(body).replaceAll(getServerConfig().apiKey, '[REDACTED]'),
+    }),
+    ...(data?.retryAfter !== undefined && { retryAfter: data.retryAfter }),
+    ...(data?.retryAttempts !== undefined && { retryAttempts: data.retryAttempts }),
+    reason,
+    retryable,
   });
 }
 
@@ -269,7 +313,7 @@ export class GuardianService {
           pages: r.pages,
           page_size: r.results.length,
           order_by: r.orderBy ?? params.order_by ?? 'relevance',
-          results: r.results.map(normalizeArticle),
+          results: r.results.map((raw) => normalizeArticle(raw)),
         };
       },
       {
@@ -294,7 +338,7 @@ export class GuardianService {
         const text = await response.text();
         assertNotHtmlPage(text);
         const data = JSON.parse(text) as RawSingleResponse;
-        return normalizeArticle(data.response.content);
+        return normalizeArticle(data.response.content, false);
       },
       {
         operation: 'GuardianService.getContent',
@@ -332,7 +376,7 @@ export class GuardianService {
           pages: r.pages,
           page_size: r.results.length,
           order_by: 'newest', // section endpoint always returns newest first
-          results: r.results.map(normalizeArticle),
+          results: r.results.map((raw) => normalizeArticle(raw)),
         };
       },
       {

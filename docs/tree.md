@@ -1,6 +1,6 @@
 # guardian-mcp-server - Directory Structure
 
-Generated on: 2026-10-07 22:22:22
+Generated on: 2026-10-16 14:02:06
 
 ```text
 guardian-mcp-server/
@@ -144,9 +144,9 @@ guardian-mcp-server/
 │   │   │   └── definitions/
 │   │   └── tools/
 │   │       └── definitions/
-│   │           ├── guardian-browse.tool.ts
+│   │           ├── guardian-browse-content.tool.ts
 │   │           ├── guardian-get-article.tool.ts
-│   │           └── guardian-search.tool.ts
+│   │           └── guardian-search-articles.tool.ts
 │   ├── services/
 │   │   └── guardian/
 │   │       ├── guardian-service.ts
@@ -159,11 +159,12 @@ guardian-mcp-server/
 │   │   └── tools/
 │   │       └── definitions/
 │   │           ├── error-envelope.test.ts
-│   │           ├── guardian-browse.tool.test.ts
+│   │           ├── guardian-browse-content.tool.test.ts
 │   │           ├── guardian-get-article.tool.test.ts
-│   │           └── guardian-search.tool.test.ts
+│   │           └── guardian-search-articles.tool.test.ts
 │   └── services/
 │       └── guardian/
+│           ├── guardian-http.test.ts
 │           └── guardian-service.test.ts
 ├── .dockerignore
 ├── .env.example

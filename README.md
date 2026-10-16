@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.1.5-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/guardian-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-%5E2.2.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/guardian-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/guardian-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-%5E7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.2-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.1.5-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/guardian-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-%5E2.3.1-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/guardian-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/guardian-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-%5E7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.3-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -29,35 +29,38 @@ The Guardian's journalism archive (1999–present), via the Guardian Open Platfo
 
 | Tool | Description |
 |:-----|:------------|
-| `guardian_search` | Full-text search across The Guardian's archive with optional section, tag, contributor, and date filters |
+| `guardian_search_articles` | Full-text search across The Guardian's archive with optional section, tag, contributor, and date filters |
 | `guardian_get_article` | Fetch a single Guardian article by ID with body text and metadata |
-| `guardian_browse` | Browse by section or tag, or discover available sections and tags, across four modes |
+| `guardian_browse_content` | Browse by section or tag, or discover available sections and tags, across four modes |
 
 ---
 
 ## Capability reference
 
-### `guardian_search` <sub>tool</sub>
+### `guardian_search_articles` <sub>tool</sub>
 
 - Boolean `query` syntax (`AND`/`OR`/`NOT`, quoted phrases), optional `section`/`tag`/`contributor` and `from_date`/`to_date` (`YYYY-MM-DD`) filters; `order_by`: `relevance` (default), `newest`, or `oldest`; `page` + `page_size` (1–50, default 10)
 - Articles carry metadata, HTML-stripped body text and a `truncated` flag; results include `total`, `page`, `pages`, `page_size`, and `order_by`
-- Typed error reasons: `unauthorized`, `no_results`, `invalid_date`, `api_error` (retryable)
+- Search-specific reasons: `no_results`, `invalid_date`. Dates must be real calendar dates, including leap-year rules; blank bounds are omitted before calling the API.
+- `tag` accepts comma (AND), pipe `|` (OR), hyphen `-` (NOT), and parentheses. For example, `environment/climate-crisis|environment/flooding`. When adding `contributor: "profile/georgemonbiot"`, group the expression as `(environment/climate-crisis|environment/flooding)`; the two filters are comma-joined unchanged.
 
 ---
 
 ### `guardian_get_article` <sub>tool</sub>
 
-- Required `article_id`: the path-slug `id` returned by `guardian_search` or `guardian_browse`
+- Required `article_id`: the path-slug `id` returned by `guardian_search_articles` or `guardian_browse_content`
 - Returns HTML-stripped body text, metadata, contributors, pillar/section classification, and `truncated`
-- Typed error reasons: `unauthorized`, `not_found`, `api_error` (retryable)
+- Article-specific reason: `not_found`.
 
 ---
 
-### `guardian_browse` <sub>tool</sub>
+### `guardian_browse_content` <sub>tool</sub>
 
 - Four `mode` values: `section_latest` (requires `section_id`), `tag_latest` (requires `tag_id`), `list_sections`, `list_tags`; `page` + `page_size` (1–50, default 10) for articles and tags
 - `list_tags` filters by optional `query` and `tag_type` (`keyword`, `contributor`, `blog`, `series`, `tone`, `type`, `publication`, `newspaper-book`, `newspaper-book-section`); output carries `mode`, `total`, and the matching `results`/`sections`/`tags` array
-- Typed error reasons: `unauthorized`, `missing_section_id`, `missing_tag_id`, `section_not_found`, `tag_not_found`, `api_error` (retryable)
+- Browse-specific reasons: `missing_section_id`, `missing_tag_id`, `section_not_found`, `tag_not_found`. `tag_id` in `tag_latest` accepts the same boolean expressions as search's `tag`.
+
+All three tools use authored Guardian error messages and canonical `status`/`body` diagnostic fields, without request URLs or duplicate aliases. HTTP failures preserve status-specific error codes. `unauthorized` (401), `access_denied` (403), `request_rejected` (400), `validation_failed` (422), `invalid_request`, `request_conflict`, and `request_not_found` are explicitly nonretryable and carry parameter or configuration recovery. Article/section 404 retain `not_found`/`section_not_found`. `api_timeout` (408/425/504), `rate_limited` (429), and `api_error` (other 5xx) are retryable after the existing three internal retries. `api_unsupported` (501) is nonretryable and is attempted once. Each reason's recovery hint and retryability appear on both client surfaces.
 
 ---
 
@@ -69,13 +72,13 @@ Guardian-specific:
 
 - Wraps the Guardian Open Platform API with a free non-commercial developer key
 - Full body text extraction — HTML stripped, not just headlines or abstracts
-- Contributor ID discovery via `guardian_browse` mode `list_tags` with `tag_type=contributor`
+- Contributor ID discovery via `guardian_browse_content` mode `list_tags` with `tag_type=contributor`
 - Section and tag taxonomy browsing (`list_sections`, `list_tags`) for filter discovery before searching
 - Free tier: 5,000 requests/day, 12 calls/second — the server applies no additional throttling
 
 Agent-friendly output:
 
-- Article bodies are capped at 2,000 words across all three tools; `truncated: true` signals a cut. Read the article's `web_url` for the full text.
+- Search and article-returning browse modes cap previews at 2,000 words. Each article renders its explicit `truncated` state; when true, call `guardian_get_article` with its `id` as `article_id` for complete HTML-stripped text without a word cap.
 - Typed error reasons across all three tools, each paired with a recovery hint
 - `total` / `page` / `pages` on every paginated response so callers can track result scope
 - Declared recovery hints on error responses, with a request ID for matching server logs
@@ -244,7 +247,7 @@ The Dockerfile defaults to HTTP transport, stateless session mode, and logs to `
 |:----------|:--------|
 | `src/index.ts` | `createApp()` entry point — registers tools and initializes the Guardian service. |
 | `src/config` | Server-specific environment variable parsing (`GUARDIAN_API_KEY`). |
-| `src/mcp-server/tools` | Tool definitions (`*.tool.ts`): `guardian_search`, `guardian_get_article`, `guardian_browse`. |
+| `src/mcp-server/tools` | Tool definitions (`*.tool.ts`): `guardian_search_articles`, `guardian_get_article`, `guardian_browse_content`. |
 | `src/services/guardian` | Guardian Open Platform API client, normalization, and type definitions. |
 | `tests/` | Unit and integration tests. |
 | `docs/` | Design document and directory tree. |

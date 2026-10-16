@@ -1,15 +1,15 @@
 /**
- * @fileoverview Tests for guardian_search tool.
- * @module tests/mcp-server/tools/definitions/guardian-search.tool.test
+ * @fileoverview Tests for guardian_search_articles tool.
+ * @module tests/mcp-server/tools/definitions/guardian-search-articles.tool.test
  */
 
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
 import { createMockContext } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { guardianSearch } from '@/mcp-server/tools/definitions/guardian-search.tool.js';
+import { guardianSearchArticles } from '@/mcp-server/tools/definitions/guardian-search-articles.tool.js';
 
 // ---------------------------------------------------------------------------
-// Mock the guardian service
+// Mock the Guardian service
 // ---------------------------------------------------------------------------
 vi.mock('@/services/guardian/guardian-service.js', () => ({
   getGuardianService: vi.fn(),
@@ -68,7 +68,7 @@ function first<T>(items: T[]): T {
 }
 
 /** Return the text of the first content block, asserting it is a text block. */
-function textOf(blocks: ReturnType<NonNullable<typeof guardianSearch.format>>): string {
+function textOf(blocks: ReturnType<NonNullable<typeof guardianSearchArticles.format>>): string {
   const block = first(blocks);
   if (block.type !== 'text') throw new Error('Expected a text content block');
   return block.text;
@@ -78,14 +78,62 @@ function textOf(blocks: ReturnType<NonNullable<typeof guardianSearch.format>>): 
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('guardianSearch', () => {
+describe('guardianSearchArticles', () => {
   describe('handler', () => {
+    it.each(['2024-02-29', '2000-02-29', '2023-02-28', ''])(
+      'accepts valid or omitted calendar date %s',
+      async (date) => {
+        mockService.search.mockResolvedValueOnce(sampleSearchResult);
+        const ctx = createMockContext({ errors: guardianSearchArticles.errors });
+        await guardianSearchArticles.handler(
+          guardianSearchArticles.input.parse({ query: 'test', from_date: date, to_date: date }),
+          ctx,
+        );
+        const params = mockService.search.mock.calls[0]?.[0];
+        if (date) expect(params).toMatchObject({ from_date: date, to_date: date });
+        else {
+          expect(params).not.toHaveProperty('from_date');
+          expect(params).not.toHaveProperty('to_date');
+        }
+      },
+    );
+
+    it('passes boolean expressions and contributor grouping unchanged', async () => {
+      mockService.search.mockResolvedValueOnce(sampleSearchResult);
+      const ctx = createMockContext({ errors: guardianSearchArticles.errors });
+      const tag = '(environment/climate-crisis|environment/flooding)';
+      await guardianSearchArticles.handler(
+        guardianSearchArticles.input.parse({
+          query: '',
+          tag,
+          contributor: 'profile/georgemonbiot',
+        }),
+        ctx,
+      );
+      expect(mockService.search).toHaveBeenCalledWith(
+        expect.objectContaining({ tag, contributor: 'profile/georgemonbiot' }),
+        ctx,
+      );
+    });
+    it.each(['2024-02-30', '2023-02-29', '1900-02-29', '2024-13-01', '2024-01-00'])(
+      'rejects calendar-invalid date %s without calling the service',
+      async (date) => {
+        const ctx = createMockContext({ errors: guardianSearchArticles.errors });
+        for (const field of ['from_date', 'to_date']) {
+          const input = guardianSearchArticles.input.parse({ query: 'test', [field]: date });
+          await expect(guardianSearchArticles.handler(input, ctx)).rejects.toMatchObject({
+            data: { reason: 'invalid_date' },
+          });
+        }
+        expect(mockService.search).not.toHaveBeenCalled();
+      },
+    );
     it('returns search results for a valid query', async () => {
       mockService.search.mockResolvedValueOnce(sampleSearchResult);
-      const ctx = createMockContext({ errors: guardianSearch.errors });
-      const input = guardianSearch.input.parse({ query: 'climate change' });
+      const ctx = createMockContext({ errors: guardianSearchArticles.errors });
+      const input = guardianSearchArticles.input.parse({ query: 'climate change' });
 
-      const result = await guardianSearch.handler(input, ctx);
+      const result = await guardianSearchArticles.handler(input, ctx);
 
       const article = first(result.results);
       expect(article.id).toBe(sampleArticle.id);
@@ -98,36 +146,36 @@ describe('guardianSearch', () => {
         total: 0,
         results: [],
       });
-      const ctx = createMockContext({ errors: guardianSearch.errors });
-      const input = guardianSearch.input.parse({ query: 'xyzzy impossible query' });
+      const ctx = createMockContext({ errors: guardianSearchArticles.errors });
+      const input = guardianSearchArticles.input.parse({ query: 'xyzzy impossible query' });
 
-      await expect(guardianSearch.handler(input, ctx)).rejects.toMatchObject({
+      await expect(guardianSearchArticles.handler(input, ctx)).rejects.toMatchObject({
         code: JsonRpcErrorCode.NotFound,
         data: { reason: 'no_results' },
       });
     });
 
     it('throws invalid_date with data.reason="invalid_date" for malformed from_date', async () => {
-      const ctx = createMockContext({ errors: guardianSearch.errors });
-      const input = guardianSearch.input.parse({
+      const ctx = createMockContext({ errors: guardianSearchArticles.errors });
+      const input = guardianSearchArticles.input.parse({
         query: 'test',
         from_date: '15-01-2024', // wrong format
       });
 
-      await expect(guardianSearch.handler(input, ctx)).rejects.toMatchObject({
+      await expect(guardianSearchArticles.handler(input, ctx)).rejects.toMatchObject({
         code: JsonRpcErrorCode.ValidationError,
         data: { reason: 'invalid_date' },
       });
     });
 
     it('throws invalid_date with data.reason="invalid_date" for malformed to_date', async () => {
-      const ctx = createMockContext({ errors: guardianSearch.errors });
-      const input = guardianSearch.input.parse({
+      const ctx = createMockContext({ errors: guardianSearchArticles.errors });
+      const input = guardianSearchArticles.input.parse({
         query: 'test',
         to_date: 'January 15 2024', // wrong format
       });
 
-      await expect(guardianSearch.handler(input, ctx)).rejects.toMatchObject({
+      await expect(guardianSearchArticles.handler(input, ctx)).rejects.toMatchObject({
         code: JsonRpcErrorCode.ValidationError,
         data: { reason: 'invalid_date' },
       });
@@ -140,10 +188,10 @@ describe('guardianSearch', () => {
           reason: 'unauthorized',
         }),
       );
-      const ctx = createMockContext({ errors: guardianSearch.errors });
-      const input = guardianSearch.input.parse({ query: 'test' });
+      const ctx = createMockContext({ errors: guardianSearchArticles.errors });
+      const input = guardianSearchArticles.input.parse({ query: 'test' });
 
-      await expect(guardianSearch.handler(input, ctx)).rejects.toMatchObject({
+      await expect(guardianSearchArticles.handler(input, ctx)).rejects.toMatchObject({
         code: JsonRpcErrorCode.Unauthorized,
         data: { reason: 'unauthorized' },
       });
@@ -151,8 +199,8 @@ describe('guardianSearch', () => {
 
     it('passes section and tag filters to the service', async () => {
       mockService.search.mockResolvedValueOnce(sampleSearchResult);
-      const ctx = createMockContext({ errors: guardianSearch.errors });
-      const input = guardianSearch.input.parse({
+      const ctx = createMockContext({ errors: guardianSearchArticles.errors });
+      const input = guardianSearchArticles.input.parse({
         query: 'test',
         section: 'politics',
         tag: 'climate-crisis',
@@ -161,7 +209,7 @@ describe('guardianSearch', () => {
         page_size: 5,
       });
 
-      await guardianSearch.handler(input, ctx);
+      await guardianSearchArticles.handler(input, ctx);
 
       expect(mockService.search).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -194,10 +242,10 @@ describe('guardianSearch', () => {
         results: [sparseArticle],
       });
 
-      const ctx = createMockContext({ errors: guardianSearch.errors });
-      const input = guardianSearch.input.parse({ query: 'sparse test' });
+      const ctx = createMockContext({ errors: guardianSearchArticles.errors });
+      const input = guardianSearchArticles.input.parse({ query: 'sparse test' });
 
-      const result = await guardianSearch.handler(input, ctx);
+      const result = await guardianSearchArticles.handler(input, ctx);
       const sparse = first(result.results);
       expect(sparse.standfirst).toBeUndefined();
       expect(sparse.body).toBeUndefined();
@@ -206,8 +254,21 @@ describe('guardianSearch', () => {
   });
 
   describe('format', () => {
+    it.each([false, true])(
+      'renders explicit truncation state %s for a populated body',
+      (truncated) => {
+        expect(
+          textOf(
+            guardianSearchArticles.format!({
+              ...sampleSearchResult,
+              results: [{ ...sampleArticle, truncated }],
+            }),
+          ),
+        ).toContain(`**Truncated:** ${truncated}`);
+      },
+    );
     it('renders article headline, metadata, and body', () => {
-      const text = textOf(guardianSearch.format!(sampleSearchResult));
+      const text = textOf(guardianSearchArticles.format!(sampleSearchResult));
       expect(text).toContain('Test Headline');
       expect(text).toContain(sampleArticle.id);
       expect(text).toContain('Jane Doe');
@@ -219,7 +280,7 @@ describe('guardianSearch', () => {
         ...sampleSearchResult,
         results: [{ ...sampleArticle, truncated: true }],
       };
-      const text = textOf(guardianSearch.format!(truncatedResult));
+      const text = textOf(guardianSearchArticles.format!(truncatedResult));
       expect(text).toContain('guardian_get_article');
     });
 
@@ -228,7 +289,7 @@ describe('guardianSearch', () => {
         ...sampleSearchResult,
         results: [{ ...sampleArticle, body: undefined }],
       };
-      const text = textOf(guardianSearch.format!(noBodyResult));
+      const text = textOf(guardianSearchArticles.format!(noBodyResult));
       expect(text).toContain('not available');
     });
   });

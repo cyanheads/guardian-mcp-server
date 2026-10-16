@@ -12,7 +12,7 @@ export const guardianGetArticle = tool('guardian_get_article', {
   title: 'Get Guardian Article',
   description:
     'Fetch a single Guardian article by its ID (path slug) with full body text and all metadata. ' +
-    'Returns the complete untruncated text for an article ID from guardian_search results. ' +
+    'Returns the complete untruncated text for an article ID from guardian_search_articles results. ' +
     'Powered by The Guardian (open-platform.theguardian.com).',
   annotations: { readOnlyHint: true, idempotentHint: true },
 
@@ -20,7 +20,7 @@ export const guardianGetArticle = tool('guardian_get_article', {
     article_id: z
       .string()
       .describe(
-        'Guardian article ID — the path slug returned in guardian_search results ' +
+        'Guardian article ID — the path slug returned in guardian_search_articles results ' +
           '(e.g. "world/2024/mar/01/russia-ukraine-war-latest"). The id field in search results ' +
           'is the correct value to pass here.',
       ),
@@ -45,10 +45,12 @@ export const guardianGetArticle = tool('guardian_get_article', {
     body: z
       .string()
       .describe(
-        'Full article body text (HTML stripped). Truncated at 2,000 words with a note appended if longer. ' +
+        'Complete article body text (HTML stripped), without a word limit. ' +
           'Returns a placeholder note for galleries, live blogs, and interactives where body is unavailable.',
       ),
-    truncated: z.boolean().describe('True when the body was truncated at 2,000 words.'),
+    truncated: z
+      .boolean()
+      .describe('False: single-article retrieval returns the complete available body.'),
     contributors: z
       .array(
         z
@@ -77,13 +79,85 @@ export const guardianGetArticle = tool('guardian_get_article', {
       code: JsonRpcErrorCode.NotFound,
       when: 'No article exists with the given ID.',
       recovery:
-        'Verify the article_id matches an id returned by guardian_search. IDs follow the pattern "section/YYYY/mon/DD/slug".',
+        'Verify the article_id matches an id returned by guardian_search_articles. IDs follow the pattern "section/YYYY/mon/DD/slug".',
+      thrownBy: 'service',
+    },
+    {
+      reason: 'request_rejected',
+      code: JsonRpcErrorCode.InvalidParams,
+      when: 'The Guardian API returned HTTP 400.',
+      recovery: 'Check the search parameters and use a page within the available range.',
+      retryable: false,
+      thrownBy: 'service',
+    },
+    {
+      reason: 'access_denied',
+      code: JsonRpcErrorCode.Forbidden,
+      when: 'The Guardian API denied access.',
+      recovery: 'Check the API key permissions and Guardian access limits before trying again.',
+      retryable: false,
+      thrownBy: 'service',
+    },
+    {
+      reason: 'validation_failed',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'The Guardian API rejected a parameter value.',
+      recovery: 'Correct the supplied parameter values before trying the request again.',
+      retryable: false,
+      thrownBy: 'service',
+    },
+    {
+      reason: 'invalid_request',
+      code: JsonRpcErrorCode.InvalidRequest,
+      when: 'The Guardian API cannot serve this request.',
+      recovery: 'Check the requested operation and parameters before trying again.',
+      retryable: false,
+      thrownBy: 'service',
+    },
+    {
+      reason: 'request_conflict',
+      code: JsonRpcErrorCode.Conflict,
+      when: 'The Guardian API reported a request conflict.',
+      recovery: 'Review the request parameters and resolve the conflict before trying again.',
+      retryable: false,
+      thrownBy: 'service',
+    },
+    {
+      reason: 'request_not_found',
+      code: JsonRpcErrorCode.NotFound,
+      when: 'The Guardian API could not find the requested endpoint.',
+      recovery: 'Check the requested operation and identifiers before trying again.',
+      retryable: false,
+      thrownBy: 'service',
+    },
+    {
+      reason: 'api_timeout',
+      code: JsonRpcErrorCode.Timeout,
+      when: 'The Guardian request timed out or the API returned a timeout status.',
+      recovery: 'Retry after a short delay with the same request.',
+      retryable: true,
+      thrownBy: 'service',
+    },
+    {
+      reason: 'rate_limited',
+      code: JsonRpcErrorCode.RateLimited,
+      when: 'The Guardian API returned HTTP 429.',
+      recovery: 'Wait for the Guardian rate limit to reset before retrying.',
+      retryable: true,
+      thrownBy: 'service',
+    },
+    {
+      reason: 'api_unsupported',
+      code: JsonRpcErrorCode.ServiceUnavailable,
+      when: 'The Guardian API returned HTTP 501.',
+      recovery: 'Check the requested operation; repeating the same request will not help.',
+      retryable: false,
       thrownBy: 'service',
     },
     {
       reason: 'api_error',
       code: JsonRpcErrorCode.ServiceUnavailable,
-      when: 'The Guardian API returned a non-OK status.',
+      when: 'The Guardian API returned a retryable server failure (excluding HTTP 501), an HTML error page, or a network failure.',
       recovery: 'Retry after a short delay.',
       retryable: true,
       thrownBy: 'service',
@@ -149,12 +223,7 @@ export const guardianGetArticle = tool('guardian_get_article', {
     lines.push('---');
     lines.push('');
     lines.push(result.body);
-    if (result.truncated) {
-      lines.push('');
-      lines.push(
-        `*(Body truncated at 2,000 words — this is the full text available via the server)*`,
-      );
-    }
+    lines.push(`**Truncated:** ${result.truncated}`);
 
     return [{ type: 'text', text: lines.join('\n') }];
   },

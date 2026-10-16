@@ -1,8 +1,8 @@
 /**
- * @fileoverview guardian_browse tool — browse The Guardian by section or tag, or discover
+ * @fileoverview guardian_browse_content tool — browse The Guardian by section or tag, or discover
  * available sections and tags. Four modes: section_latest, tag_latest, list_sections, list_tags.
  * Powered by The Guardian.
- * @module mcp-server/tools/definitions/guardian-browse
+ * @module mcp-server/tools/definitions/guardian-browse-content
  */
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
@@ -44,7 +44,7 @@ const SectionSchema = z.object({
   id: z
     .string()
     .describe(
-      'Section ID — use as the section parameter in guardian_search or guardian_browse section_latest mode.',
+      'Section ID — use as the section parameter in guardian_search_articles or guardian_browse_content section_latest mode.',
     ),
   name: z.string().describe('Display name (normalized from wire field webTitle).'),
   web_url: z.string().describe('Section URL on theguardian.com.'),
@@ -54,7 +54,7 @@ const TagSchema = z.object({
   id: z
     .string()
     .describe(
-      'Tag ID — use as the tag parameter in guardian_search or guardian_browse tag_latest mode.',
+      'Tag ID — use as the tag parameter in guardian_search_articles or guardian_browse_content tag_latest mode.',
     ),
   type: z
     .string()
@@ -134,8 +134,8 @@ function toBrowseArticle(a: NormalizedArticle) {
 // Tool definition
 // ---------------------------------------------------------------------------
 
-export const guardianBrowse = tool('guardian_browse', {
-  title: 'Browse The Guardian',
+export const guardianBrowseContent = tool('guardian_browse_content', {
+  title: 'Browse Guardian Content',
   description:
     "Browse The Guardian's content by section or tag, or discover available sections and tags " +
     'for use as filters. Four modes: "section_latest" returns the newest articles from a section ' +
@@ -167,8 +167,9 @@ export const guardianBrowse = tool('guardian_browse', {
       .string()
       .optional()
       .describe(
-        'Tag ID for tag_latest mode (e.g. "environment/climate-change", "technology/artificial-intelligence", ' +
-          '"world/ukraine"). Required for tag_latest. Use list_tags first to discover valid tag IDs.',
+        'Tag ID for tag_latest mode (e.g. "environment/climate-crisis", "technology/artificial-intelligence", ' +
+          '"world/ukraine"). Supports comma (AND), pipe | (OR), hyphen - (NOT), and parentheses, ' +
+          'e.g. environment/climate-crisis|environment/flooding. Required for tag_latest. Use list_tags first to discover valid tag IDs.',
       ),
     query: z
       .string()
@@ -262,9 +263,81 @@ export const guardianBrowse = tool('guardian_browse', {
       recovery: 'Use mode=list_tags with a query to find the correct tag ID.',
     },
     {
+      reason: 'request_rejected',
+      code: JsonRpcErrorCode.InvalidParams,
+      when: 'The Guardian API returned HTTP 400.',
+      recovery: 'Check the search parameters and use a page within the available range.',
+      retryable: false,
+      thrownBy: 'service',
+    },
+    {
+      reason: 'access_denied',
+      code: JsonRpcErrorCode.Forbidden,
+      when: 'The Guardian API denied access.',
+      recovery: 'Check the API key permissions and Guardian access limits before trying again.',
+      retryable: false,
+      thrownBy: 'service',
+    },
+    {
+      reason: 'validation_failed',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'The Guardian API rejected a parameter value.',
+      recovery: 'Correct the supplied parameter values before trying the request again.',
+      retryable: false,
+      thrownBy: 'service',
+    },
+    {
+      reason: 'invalid_request',
+      code: JsonRpcErrorCode.InvalidRequest,
+      when: 'The Guardian API cannot serve this request.',
+      recovery: 'Check the requested operation and parameters before trying again.',
+      retryable: false,
+      thrownBy: 'service',
+    },
+    {
+      reason: 'request_conflict',
+      code: JsonRpcErrorCode.Conflict,
+      when: 'The Guardian API reported a request conflict.',
+      recovery: 'Review the request parameters and resolve the conflict before trying again.',
+      retryable: false,
+      thrownBy: 'service',
+    },
+    {
+      reason: 'request_not_found',
+      code: JsonRpcErrorCode.NotFound,
+      when: 'The Guardian API could not find the requested endpoint.',
+      recovery: 'Check the requested operation and identifiers before trying again.',
+      retryable: false,
+      thrownBy: 'service',
+    },
+    {
+      reason: 'api_timeout',
+      code: JsonRpcErrorCode.Timeout,
+      when: 'The Guardian request timed out or the API returned a timeout status.',
+      recovery: 'Retry after a short delay with the same request.',
+      retryable: true,
+      thrownBy: 'service',
+    },
+    {
+      reason: 'rate_limited',
+      code: JsonRpcErrorCode.RateLimited,
+      when: 'The Guardian API returned HTTP 429.',
+      recovery: 'Wait for the Guardian rate limit to reset before retrying.',
+      retryable: true,
+      thrownBy: 'service',
+    },
+    {
+      reason: 'api_unsupported',
+      code: JsonRpcErrorCode.ServiceUnavailable,
+      when: 'The Guardian API returned HTTP 501.',
+      recovery: 'Check the requested operation; repeating the same request will not help.',
+      retryable: false,
+      thrownBy: 'service',
+    },
+    {
       reason: 'api_error',
       code: JsonRpcErrorCode.ServiceUnavailable,
-      when: 'The Guardian API returned a non-OK status.',
+      when: 'The Guardian API returned a retryable server failure (excluding HTTP 501), an HTML error page, or a network failure.',
       recovery: 'Retry after a short delay.',
       retryable: true,
       thrownBy: 'service',
@@ -387,17 +460,16 @@ export const guardianBrowse = tool('guardian_browse', {
         if (article.standfirst) lines.push(`*${article.standfirst}*`);
         if (article.word_count != null) lines.push(`**words:** ${article.word_count}`);
         lines.push(`**url:** ${article.web_url}`);
+        lines.push(`**truncated:** ${article.truncated}`);
         if (article.thumbnail) lines.push(`**thumbnail:** ${article.thumbnail}`);
         if (article.body) {
           lines.push('');
           lines.push(article.body);
           if (article.truncated) {
             lines.push(
-              `*(truncated — use guardian_get_article with id "${article.id}" for full text)*`,
+              `*(truncated — use guardian_get_article with article_id "${article.id}" for full text)*`,
             );
           }
-        } else {
-          lines.push(`**truncated:** ${article.truncated}`);
         }
         lines.push('');
       }

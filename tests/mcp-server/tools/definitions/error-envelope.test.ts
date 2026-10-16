@@ -9,9 +9,9 @@
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
 import { runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { guardianBrowse } from '@/mcp-server/tools/definitions/guardian-browse.tool.js';
+import { guardianBrowseContent } from '@/mcp-server/tools/definitions/guardian-browse-content.tool.js';
 import { guardianGetArticle } from '@/mcp-server/tools/definitions/guardian-get-article.tool.js';
-import { guardianSearch } from '@/mcp-server/tools/definitions/guardian-search.tool.js';
+import { guardianSearchArticles } from '@/mcp-server/tools/definitions/guardian-search-articles.tool.js';
 import { initGuardianService } from '@/services/guardian/guardian-service.js';
 
 vi.mock('@/config/server-config.js', () => ({
@@ -45,7 +45,7 @@ type CallToolResult = Awaited<ReturnType<typeof runToolContract>>;
 
 interface ErrorEnvelope {
   code: number;
-  data?: { reason?: string; recovery?: { hint?: string } };
+  data?: { reason?: string; retryable?: boolean; recovery?: { hint?: string } };
   message: string;
 }
 
@@ -122,8 +122,11 @@ const emptySearch = {
 // ---------------------------------------------------------------------------
 
 describe('argument rejection', () => {
-  it('rejects an out-of-range page_size on guardian_search as invalid_arguments', async () => {
-    const result = await runToolContract(guardianSearch, { query: 'climate', page_size: 0 });
+  it('rejects an out-of-range page_size on guardian_search_articles as invalid_arguments', async () => {
+    const result = await runToolContract(guardianSearchArticles, {
+      query: 'climate',
+      page_size: 0,
+    });
 
     const error = errorOf(result);
     expect(error.code).toBe(JsonRpcErrorCode.InvalidParams);
@@ -132,14 +135,14 @@ describe('argument rejection', () => {
     expect(error.message).toContain('page_size');
 
     const text = textOf(result);
-    expect(text).toContain('guardian_search');
+    expect(text).toContain('guardian_search_articles');
     expect(text).toContain('page_size');
     expect(text).toContain('(reason invalid_arguments');
     expect(fetchWithTimeout).not.toHaveBeenCalled();
   });
 
-  it('rejects an unknown mode on guardian_browse as invalid_arguments', async () => {
-    const result = await runToolContract(guardianBrowse, {
+  it('rejects an unknown mode on guardian_browse_content as invalid_arguments', async () => {
+    const result = await runToolContract(guardianBrowseContent, {
       mode: 'latest' as never,
     });
 
@@ -163,8 +166,8 @@ describe('argument rejection', () => {
 });
 
 describe('handler-thrown contract reasons', () => {
-  it('guardian_search invalid_date forwards its declared recovery', async () => {
-    const result = await runToolContract(guardianSearch, {
+  it('guardian_search_articles invalid_date forwards its declared recovery', async () => {
+    const result = await runToolContract(guardianSearchArticles, {
       query: 'climate',
       from_date: '15-01-2024',
     });
@@ -172,37 +175,37 @@ describe('handler-thrown contract reasons', () => {
     expectContractFailure(result, {
       code: JsonRpcErrorCode.ValidationError,
       reason: 'invalid_date',
-      recovery: declaredRecovery(guardianSearch.errors, 'invalid_date'),
+      recovery: declaredRecovery(guardianSearchArticles.errors, 'invalid_date'),
     });
     expect(fetchWithTimeout).not.toHaveBeenCalled();
   });
 
-  it('guardian_search no_results forwards its declared recovery', async () => {
+  it('guardian_search_articles no_results forwards its declared recovery', async () => {
     vi.mocked(fetchWithTimeout).mockResolvedValueOnce(jsonResponse(emptySearch));
 
-    const result = await runToolContract(guardianSearch, { query: 'xyzzy' });
+    const result = await runToolContract(guardianSearchArticles, { query: 'xyzzy' });
 
     expectContractFailure(result, {
       code: JsonRpcErrorCode.NotFound,
       reason: 'no_results',
-      recovery: declaredRecovery(guardianSearch.errors, 'no_results'),
+      recovery: declaredRecovery(guardianSearchArticles.errors, 'no_results'),
     });
   });
 
-  it('guardian_browse missing_tag_id forwards its declared recovery', async () => {
-    const result = await runToolContract(guardianBrowse, { mode: 'tag_latest' });
+  it('guardian_browse_content missing_tag_id forwards its declared recovery', async () => {
+    const result = await runToolContract(guardianBrowseContent, { mode: 'tag_latest' });
 
     expectContractFailure(result, {
       code: JsonRpcErrorCode.ValidationError,
       reason: 'missing_tag_id',
-      recovery: declaredRecovery(guardianBrowse.errors, 'missing_tag_id'),
+      recovery: declaredRecovery(guardianBrowseContent.errors, 'missing_tag_id'),
     });
   });
 
-  it('guardian_browse tag_not_found forwards its declared recovery', async () => {
+  it('guardian_browse_content tag_not_found forwards its declared recovery', async () => {
     vi.mocked(fetchWithTimeout).mockResolvedValueOnce(jsonResponse(emptySearch));
 
-    const result = await runToolContract(guardianBrowse, {
+    const result = await runToolContract(guardianBrowseContent, {
       mode: 'tag_latest',
       tag_id: 'no/such/tag',
     });
@@ -210,37 +213,92 @@ describe('handler-thrown contract reasons', () => {
     expectContractFailure(result, {
       code: JsonRpcErrorCode.NotFound,
       reason: 'tag_not_found',
-      recovery: declaredRecovery(guardianBrowse.errors, 'tag_not_found'),
+      recovery: declaredRecovery(guardianBrowseContent.errors, 'tag_not_found'),
     });
   });
 });
 
 describe('service-thrown contract reasons (thrownBy: service)', () => {
-  it('guardian_search unauthorized carries the tool-declared recovery from the service', async () => {
+  it.each([
+    [
+      guardianSearchArticles,
+      { query: 'test' },
+      400,
+      JsonRpcErrorCode.InvalidParams,
+      'request_rejected',
+      false,
+    ],
+    [
+      guardianGetArticle,
+      { article_id: 'world/test' },
+      501,
+      JsonRpcErrorCode.ServiceUnavailable,
+      'api_unsupported',
+      false,
+    ],
+    [
+      guardianBrowseContent,
+      { mode: 'list_sections' },
+      429,
+      JsonRpcErrorCode.RateLimited,
+      'rate_limited',
+      true,
+    ],
+  ] as const)(
+    'wires %s HTTP status %s to both client surfaces',
+    async (tool, input, status, code, reason, retryable) => {
+      vi.mocked(fetchWithTimeout).mockRejectedValueOnce(httpFailure(status, code));
+      const result = await runToolContract(tool as typeof guardianSearchArticles, input as never);
+      expectContractFailure(result, {
+        code,
+        reason,
+        recovery: declaredRecovery(tool.errors, reason),
+      });
+      expect(errorOf(result).data?.retryable).toBe(retryable);
+      expect(textOf(result)).toContain(retryable ? '· retryable' : '· not retryable');
+    },
+  );
+
+  it.each(['from_date', 'to_date'])(
+    'rejects invalid calendar %s on both surfaces without HTTP',
+    async (field) => {
+      const result = await runToolContract(guardianSearchArticles, {
+        query: 'test',
+        [field]: '1900-02-29',
+      });
+      expectContractFailure(result, {
+        code: JsonRpcErrorCode.ValidationError,
+        reason: 'invalid_date',
+        recovery: declaredRecovery(guardianSearchArticles.errors, 'invalid_date'),
+      });
+      expect(fetchWithTimeout).not.toHaveBeenCalled();
+    },
+  );
+  it('guardian_search_articles unauthorized carries the tool-declared recovery from the service', async () => {
     vi.mocked(fetchWithTimeout).mockRejectedValueOnce(
       httpFailure(401, JsonRpcErrorCode.Unauthorized),
     );
 
-    const result = await runToolContract(guardianSearch, { query: 'climate' });
+    const result = await runToolContract(guardianSearchArticles, { query: 'climate' });
 
     expectContractFailure(result, {
       code: JsonRpcErrorCode.Unauthorized,
       reason: 'unauthorized',
-      recovery: declaredRecovery(guardianSearch.errors, 'unauthorized'),
+      recovery: declaredRecovery(guardianSearchArticles.errors, 'unauthorized'),
     });
   });
 
-  it('guardian_search api_error carries the tool-declared recovery from the service', async () => {
+  it('guardian_search_articles api_error carries the tool-declared recovery from the service', async () => {
     vi.mocked(fetchWithTimeout).mockRejectedValueOnce(
       httpFailure(503, JsonRpcErrorCode.ServiceUnavailable),
     );
 
-    const result = await runToolContract(guardianSearch, { query: 'climate' });
+    const result = await runToolContract(guardianSearchArticles, { query: 'climate' });
 
     expectContractFailure(result, {
       code: JsonRpcErrorCode.ServiceUnavailable,
       reason: 'api_error',
-      recovery: declaredRecovery(guardianSearch.errors, 'api_error'),
+      recovery: declaredRecovery(guardianSearchArticles.errors, 'api_error'),
     });
   });
 
@@ -284,10 +342,10 @@ describe('service-thrown contract reasons (thrownBy: service)', () => {
     });
   });
 
-  it('guardian_browse section_not_found (upstream 404) carries the tool-declared recovery', async () => {
+  it('guardian_browse_content section_not_found (upstream 404) carries the tool-declared recovery', async () => {
     vi.mocked(fetchWithTimeout).mockRejectedValueOnce(httpFailure(404, JsonRpcErrorCode.NotFound));
 
-    const result = await runToolContract(guardianBrowse, {
+    const result = await runToolContract(guardianBrowseContent, {
       mode: 'section_latest',
       section_id: 'nonexistent',
     });
@@ -295,35 +353,38 @@ describe('service-thrown contract reasons (thrownBy: service)', () => {
     expectContractFailure(result, {
       code: JsonRpcErrorCode.NotFound,
       reason: 'section_not_found',
-      recovery: declaredRecovery(guardianBrowse.errors, 'section_not_found'),
+      recovery: declaredRecovery(guardianBrowseContent.errors, 'section_not_found'),
     });
   });
 
-  it('guardian_browse unauthorized on list_sections carries the tool-declared recovery', async () => {
+  it('guardian_browse_content unauthorized on list_sections carries the tool-declared recovery', async () => {
     vi.mocked(fetchWithTimeout).mockRejectedValueOnce(
       httpFailure(401, JsonRpcErrorCode.Unauthorized),
     );
 
-    const result = await runToolContract(guardianBrowse, { mode: 'list_sections' });
+    const result = await runToolContract(guardianBrowseContent, { mode: 'list_sections' });
 
     expectContractFailure(result, {
       code: JsonRpcErrorCode.Unauthorized,
       reason: 'unauthorized',
-      recovery: declaredRecovery(guardianBrowse.errors, 'unauthorized'),
+      recovery: declaredRecovery(guardianBrowseContent.errors, 'unauthorized'),
     });
   });
 
-  it('guardian_browse api_error on list_tags carries the tool-declared recovery', async () => {
+  it('guardian_browse_content api_error on list_tags carries the tool-declared recovery', async () => {
     vi.mocked(fetchWithTimeout).mockRejectedValueOnce(
       httpFailure(503, JsonRpcErrorCode.ServiceUnavailable),
     );
 
-    const result = await runToolContract(guardianBrowse, { mode: 'list_tags', query: 'climate' });
+    const result = await runToolContract(guardianBrowseContent, {
+      mode: 'list_tags',
+      query: 'climate',
+    });
 
     expectContractFailure(result, {
       code: JsonRpcErrorCode.ServiceUnavailable,
       reason: 'api_error',
-      recovery: declaredRecovery(guardianBrowse.errors, 'api_error'),
+      recovery: declaredRecovery(guardianBrowseContent.errors, 'api_error'),
     });
   });
 });

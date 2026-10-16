@@ -1,12 +1,12 @@
 /**
- * @fileoverview Tests for guardian_browse tool.
- * @module tests/mcp-server/tools/definitions/guardian-browse.tool.test
+ * @fileoverview Tests for guardian_browse_content tool.
+ * @module tests/mcp-server/tools/definitions/guardian-browse-content.tool.test
  */
 
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
 import { createMockContext } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { guardianBrowse } from '@/mcp-server/tools/definitions/guardian-browse.tool.js';
+import { guardianBrowseContent } from '@/mcp-server/tools/definitions/guardian-browse-content.tool.js';
 
 vi.mock('@/services/guardian/guardian-service.js', () => ({
   getGuardianService: vi.fn(),
@@ -30,7 +30,7 @@ beforeEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// Fixtures
+// Guardian fixtures
 // ---------------------------------------------------------------------------
 
 const sampleArticle = {
@@ -80,7 +80,7 @@ function first<T>(items: T[]): T {
 }
 
 /** Return the text of the first content block, asserting it is a text block. */
-function textOf(blocks: ReturnType<NonNullable<typeof guardianBrowse.format>>): string {
+function textOf(blocks: ReturnType<NonNullable<typeof guardianBrowseContent.format>>): string {
   const block = first(blocks);
   if (block.type !== 'text') throw new Error('Expected a text content block');
   return block.text;
@@ -90,14 +90,17 @@ function textOf(blocks: ReturnType<NonNullable<typeof guardianBrowse.format>>): 
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('guardianBrowse', () => {
+describe('guardianBrowseContent', () => {
   describe('section_latest mode', () => {
     it('returns recent articles from the section', async () => {
       mockService.getSectionContent.mockResolvedValueOnce(sampleSearchResult);
-      const ctx = createMockContext({ errors: guardianBrowse.errors });
-      const input = guardianBrowse.input.parse({ mode: 'section_latest', section_id: 'world' });
+      const ctx = createMockContext({ errors: guardianBrowseContent.errors });
+      const input = guardianBrowseContent.input.parse({
+        mode: 'section_latest',
+        section_id: 'world',
+      });
 
-      const result = await guardianBrowse.handler(input, ctx);
+      const result = await guardianBrowseContent.handler(input, ctx);
 
       expect(result.mode).toBe('section_latest');
       if (result.mode === 'section_latest') {
@@ -107,10 +110,10 @@ describe('guardianBrowse', () => {
     });
 
     it('throws missing_section_id with data.reason when section_id is absent', async () => {
-      const ctx = createMockContext({ errors: guardianBrowse.errors });
-      const input = guardianBrowse.input.parse({ mode: 'section_latest' });
+      const ctx = createMockContext({ errors: guardianBrowseContent.errors });
+      const input = guardianBrowseContent.input.parse({ mode: 'section_latest' });
 
-      await expect(guardianBrowse.handler(input, ctx)).rejects.toMatchObject({
+      await expect(guardianBrowseContent.handler(input, ctx)).rejects.toMatchObject({
         code: JsonRpcErrorCode.ValidationError,
         data: { reason: 'missing_section_id' },
       });
@@ -122,13 +125,13 @@ describe('guardianBrowse', () => {
         total: 0,
         results: [],
       });
-      const ctx = createMockContext({ errors: guardianBrowse.errors });
-      const input = guardianBrowse.input.parse({
+      const ctx = createMockContext({ errors: guardianBrowseContent.errors });
+      const input = guardianBrowseContent.input.parse({
         mode: 'section_latest',
         section_id: 'invalid-section',
       });
 
-      await expect(guardianBrowse.handler(input, ctx)).rejects.toMatchObject({
+      await expect(guardianBrowseContent.handler(input, ctx)).rejects.toMatchObject({
         code: JsonRpcErrorCode.NotFound,
         data: { reason: 'section_not_found' },
       });
@@ -136,15 +139,28 @@ describe('guardianBrowse', () => {
   });
 
   describe('tag_latest mode', () => {
+    it('passes boolean tag expressions unchanged', async () => {
+      mockService.search.mockResolvedValueOnce(sampleSearchResult);
+      const tag_id = '(environment/climate-crisis|environment/flooding)-type/video';
+      const ctx = createMockContext({ errors: guardianBrowseContent.errors });
+      await guardianBrowseContent.handler(
+        guardianBrowseContent.input.parse({ mode: 'tag_latest', tag_id }),
+        ctx,
+      );
+      expect(mockService.search).toHaveBeenCalledWith(
+        expect.objectContaining({ tag: tag_id }),
+        ctx,
+      );
+    });
     it('returns articles tagged with the given tag', async () => {
       mockService.search.mockResolvedValueOnce(sampleSearchResult);
-      const ctx = createMockContext({ errors: guardianBrowse.errors });
-      const input = guardianBrowse.input.parse({
+      const ctx = createMockContext({ errors: guardianBrowseContent.errors });
+      const input = guardianBrowseContent.input.parse({
         mode: 'tag_latest',
         tag_id: 'environment/climate-change',
       });
 
-      const result = await guardianBrowse.handler(input, ctx);
+      const result = await guardianBrowseContent.handler(input, ctx);
 
       expect(result.mode).toBe('tag_latest');
       if (result.mode === 'tag_latest') {
@@ -153,10 +169,10 @@ describe('guardianBrowse', () => {
     });
 
     it('throws missing_tag_id with data.reason when tag_id is absent', async () => {
-      const ctx = createMockContext({ errors: guardianBrowse.errors });
-      const input = guardianBrowse.input.parse({ mode: 'tag_latest' });
+      const ctx = createMockContext({ errors: guardianBrowseContent.errors });
+      const input = guardianBrowseContent.input.parse({ mode: 'tag_latest' });
 
-      await expect(guardianBrowse.handler(input, ctx)).rejects.toMatchObject({
+      await expect(guardianBrowseContent.handler(input, ctx)).rejects.toMatchObject({
         code: JsonRpcErrorCode.ValidationError,
         data: { reason: 'missing_tag_id' },
       });
@@ -164,10 +180,13 @@ describe('guardianBrowse', () => {
 
     it('throws tag_not_found with data.reason when total is 0', async () => {
       mockService.search.mockResolvedValueOnce({ ...sampleSearchResult, total: 0, results: [] });
-      const ctx = createMockContext({ errors: guardianBrowse.errors });
-      const input = guardianBrowse.input.parse({ mode: 'tag_latest', tag_id: 'no/such/tag' });
+      const ctx = createMockContext({ errors: guardianBrowseContent.errors });
+      const input = guardianBrowseContent.input.parse({
+        mode: 'tag_latest',
+        tag_id: 'no/such/tag',
+      });
 
-      await expect(guardianBrowse.handler(input, ctx)).rejects.toMatchObject({
+      await expect(guardianBrowseContent.handler(input, ctx)).rejects.toMatchObject({
         code: JsonRpcErrorCode.NotFound,
         data: { reason: 'tag_not_found' },
       });
@@ -177,10 +196,10 @@ describe('guardianBrowse', () => {
   describe('list_sections mode', () => {
     it('returns all sections', async () => {
       mockService.getSections.mockResolvedValueOnce({ total: 2, sections: sampleSections });
-      const ctx = createMockContext({ errors: guardianBrowse.errors });
-      const input = guardianBrowse.input.parse({ mode: 'list_sections' });
+      const ctx = createMockContext({ errors: guardianBrowseContent.errors });
+      const input = guardianBrowseContent.input.parse({ mode: 'list_sections' });
 
-      const result = await guardianBrowse.handler(input, ctx);
+      const result = await guardianBrowseContent.handler(input, ctx);
 
       expect(result.mode).toBe('list_sections');
       if (result.mode === 'list_sections') {
@@ -192,10 +211,10 @@ describe('guardianBrowse', () => {
 
     it('passes query to getSections when provided', async () => {
       mockService.getSections.mockResolvedValueOnce({ total: 1, sections: [sampleSections[0]] });
-      const ctx = createMockContext({ errors: guardianBrowse.errors });
-      const input = guardianBrowse.input.parse({ mode: 'list_sections', query: 'world' });
+      const ctx = createMockContext({ errors: guardianBrowseContent.errors });
+      const input = guardianBrowseContent.input.parse({ mode: 'list_sections', query: 'world' });
 
-      await guardianBrowse.handler(input, ctx);
+      await guardianBrowseContent.handler(input, ctx);
 
       expect(mockService.getSections).toHaveBeenCalledWith('world', ctx);
     });
@@ -204,10 +223,10 @@ describe('guardianBrowse', () => {
   describe('list_tags mode', () => {
     it('returns tags matching a query', async () => {
       mockService.getTags.mockResolvedValueOnce({ total: 1, page: 1, pages: 1, tags: sampleTags });
-      const ctx = createMockContext({ errors: guardianBrowse.errors });
-      const input = guardianBrowse.input.parse({ mode: 'list_tags', query: 'climate' });
+      const ctx = createMockContext({ errors: guardianBrowseContent.errors });
+      const input = guardianBrowseContent.input.parse({ mode: 'list_tags', query: 'climate' });
 
-      const result = await guardianBrowse.handler(input, ctx);
+      const result = await guardianBrowseContent.handler(input, ctx);
 
       expect(result.mode).toBe('list_tags');
       if (result.mode === 'list_tags') {
@@ -218,10 +237,13 @@ describe('guardianBrowse', () => {
 
     it('passes tag_type to getTags', async () => {
       mockService.getTags.mockResolvedValueOnce({ total: 0, page: 1, pages: 1, tags: [] });
-      const ctx = createMockContext({ errors: guardianBrowse.errors });
-      const input = guardianBrowse.input.parse({ mode: 'list_tags', tag_type: 'contributor' });
+      const ctx = createMockContext({ errors: guardianBrowseContent.errors });
+      const input = guardianBrowseContent.input.parse({
+        mode: 'list_tags',
+        tag_type: 'contributor',
+      });
 
-      await guardianBrowse.handler(input, ctx);
+      await guardianBrowseContent.handler(input, ctx);
 
       expect(mockService.getTags).toHaveBeenCalledWith(
         expect.objectContaining({ tag_type: 'contributor' }),
@@ -238,10 +260,13 @@ describe('guardianBrowse', () => {
           reason: 'unauthorized',
         }),
       );
-      const ctx = createMockContext({ errors: guardianBrowse.errors });
-      const input = guardianBrowse.input.parse({ mode: 'section_latest', section_id: 'world' });
+      const ctx = createMockContext({ errors: guardianBrowseContent.errors });
+      const input = guardianBrowseContent.input.parse({
+        mode: 'section_latest',
+        section_id: 'world',
+      });
 
-      await expect(guardianBrowse.handler(input, ctx)).rejects.toMatchObject({
+      await expect(guardianBrowseContent.handler(input, ctx)).rejects.toMatchObject({
         code: JsonRpcErrorCode.Unauthorized,
         data: { reason: 'unauthorized' },
       });
@@ -254,10 +279,10 @@ describe('guardianBrowse', () => {
           reason: 'unauthorized',
         }),
       );
-      const ctx = createMockContext({ errors: guardianBrowse.errors });
-      const input = guardianBrowse.input.parse({ mode: 'list_sections' });
+      const ctx = createMockContext({ errors: guardianBrowseContent.errors });
+      const input = guardianBrowseContent.input.parse({ mode: 'list_sections' });
 
-      await expect(guardianBrowse.handler(input, ctx)).rejects.toMatchObject({
+      await expect(guardianBrowseContent.handler(input, ctx)).rejects.toMatchObject({
         code: JsonRpcErrorCode.Unauthorized,
         data: { reason: 'unauthorized' },
       });
@@ -265,24 +290,38 @@ describe('guardianBrowse', () => {
   });
 
   describe('format', () => {
+    it.each([false, true])('renders body truncation state %s explicitly', (truncated) => {
+      const text = textOf(
+        guardianBrowseContent.format!({
+          mode: 'tag_latest',
+          total: 1,
+          results: [{ ...sampleArticle, body: 'Body.', truncated }],
+        }),
+      );
+      expect(text).toContain(`**truncated:** ${truncated}`);
+      if (truncated) expect(text).toContain(`article_id "${sampleArticle.id}"`);
+    });
     it('renders section_latest results', async () => {
       mockService.getSectionContent.mockResolvedValueOnce(sampleSearchResult);
-      const ctx = createMockContext({ errors: guardianBrowse.errors });
-      const input = guardianBrowse.input.parse({ mode: 'section_latest', section_id: 'world' });
-      const result = await guardianBrowse.handler(input, ctx);
+      const ctx = createMockContext({ errors: guardianBrowseContent.errors });
+      const input = guardianBrowseContent.input.parse({
+        mode: 'section_latest',
+        section_id: 'world',
+      });
+      const result = await guardianBrowseContent.handler(input, ctx);
 
-      const text = textOf(guardianBrowse.format!(result));
+      const text = textOf(guardianBrowseContent.format!(result));
       expect(text).toContain('Test Article');
       expect(text).toContain('section_latest');
     });
 
     it('renders list_sections results', async () => {
       mockService.getSections.mockResolvedValueOnce({ total: 2, sections: sampleSections });
-      const ctx = createMockContext({ errors: guardianBrowse.errors });
-      const input = guardianBrowse.input.parse({ mode: 'list_sections' });
-      const result = await guardianBrowse.handler(input, ctx);
+      const ctx = createMockContext({ errors: guardianBrowseContent.errors });
+      const input = guardianBrowseContent.input.parse({ mode: 'list_sections' });
+      const result = await guardianBrowseContent.handler(input, ctx);
 
-      const text = textOf(guardianBrowse.format!(result));
+      const text = textOf(guardianBrowseContent.format!(result));
       expect(text).toContain('list_sections');
       expect(text).toContain('world');
       expect(text).toContain('politics');
@@ -290,11 +329,11 @@ describe('guardianBrowse', () => {
 
     it('renders list_tags results', async () => {
       mockService.getTags.mockResolvedValueOnce({ total: 1, page: 1, pages: 1, tags: sampleTags });
-      const ctx = createMockContext({ errors: guardianBrowse.errors });
-      const input = guardianBrowse.input.parse({ mode: 'list_tags', query: 'climate' });
-      const result = await guardianBrowse.handler(input, ctx);
+      const ctx = createMockContext({ errors: guardianBrowseContent.errors });
+      const input = guardianBrowseContent.input.parse({ mode: 'list_tags', query: 'climate' });
+      const result = await guardianBrowseContent.handler(input, ctx);
 
-      const text = textOf(guardianBrowse.format!(result));
+      const text = textOf(guardianBrowseContent.format!(result));
       expect(text).toContain('Climate change');
       expect(text).toContain('environment/climate-change');
     });
