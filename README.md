@@ -23,7 +23,7 @@
 
 ## Overview
 
-The Guardian's journalism archive (1999–present), via the Guardian Open Platform API. Search full text, browse by section or tag, and fetch individual articles from any MCP client. Runs as a stdio process or a local Streamable HTTP server.
+The Guardian's journalism archive, 1999 to today. Search full text, browse by section or tag, and fetch individual articles.
 
 ### Tools
 
@@ -41,8 +41,8 @@ The Guardian's journalism archive (1999–present), via the Guardian Open Platfo
 
 - Boolean `query` syntax (`AND`/`OR`/`NOT`, quoted phrases), optional `section`/`tag`/`contributor` and `from_date`/`to_date` (`YYYY-MM-DD`) filters; `order_by`: `relevance` (default), `newest`, or `oldest`; `page` + `page_size` (1–50, default 10)
 - Articles carry metadata, HTML-stripped body text and a `truncated` flag; results include `total`, `page`, `pages`, `page_size`, and `order_by`
-- Search-specific reasons: `no_results`, `invalid_date`. Dates must be real calendar dates, including leap-year rules; blank bounds are omitted before calling the API.
-- `tag` accepts comma (AND), pipe `|` (OR), hyphen `-` (NOT), and parentheses. For example, `environment/climate-crisis|environment/flooding`. When adding `contributor: "profile/georgemonbiot"`, group the expression as `(environment/climate-crisis|environment/flooding)`; the two filters are comma-joined unchanged.
+- Fails with `no_results` or `invalid_date` (dates must be real calendar dates)
+- `tag` accepts comma (AND), pipe `|` (OR), hyphen `-` (NOT), and parentheses, e.g. `environment/climate-crisis|environment/flooding`. Wrap an OR expression in parentheses when also passing `contributor`.
 
 ---
 
@@ -50,7 +50,7 @@ The Guardian's journalism archive (1999–present), via the Guardian Open Platfo
 
 - Required `article_id`: the path-slug `id` returned by `guardian_search_articles` or `guardian_browse_content`
 - Returns HTML-stripped body text, metadata, contributors, pillar/section classification, and `truncated`
-- Article-specific reason: `not_found`.
+- Fails with `not_found`
 
 ---
 
@@ -58,9 +58,9 @@ The Guardian's journalism archive (1999–present), via the Guardian Open Platfo
 
 - Four `mode` values: `section_latest` (requires `section_id`), `tag_latest` (requires `tag_id`), `list_sections`, `list_tags`; `page` + `page_size` (1–50, default 10) for articles and tags
 - `list_tags` filters by optional `query` and `tag_type` (`keyword`, `contributor`, `blog`, `series`, `tone`, `type`, `publication`, `newspaper-book`, `newspaper-book-section`); output carries `mode`, `total`, and the matching `results`/`sections`/`tags` array
-- Browse-specific reasons: `missing_section_id`, `missing_tag_id`, `section_not_found`, `tag_not_found`. `tag_id` in `tag_latest` accepts the same boolean expressions as search's `tag`.
+- Fails with `missing_section_id`, `missing_tag_id`, `section_not_found`, or `tag_not_found`. `tag_id` accepts the same boolean expressions as search's `tag`.
 
-All three tools use authored Guardian error messages and canonical `status`/`body` diagnostic fields, without request URLs or duplicate aliases. HTTP failures preserve status-specific error codes. `unauthorized` (401), `access_denied` (403), `request_rejected` (400), `validation_failed` (422), `invalid_request`, `request_conflict`, and `request_not_found` are explicitly nonretryable and carry parameter or configuration recovery. Article/section 404 retain `not_found`/`section_not_found`. `api_timeout` (408/425/504), `rate_limited` (429), and `api_error` (other 5xx) are retryable after the existing three internal retries. `api_unsupported` (501) is nonretryable and is attempted once. Each reason's recovery hint and retryability appear on both client surfaces.
+All three tools also fail with status-specific HTTP errors. Not retryable: `unauthorized` (401), `access_denied` (403), `request_rejected` (400), `validation_failed` (422), `invalid_request`, `request_conflict`, `request_not_found`, and `api_unsupported` (501). Retryable: `api_timeout` (408/425/504), `rate_limited` (429), and `api_error` (other 5xx). Each error carries a recovery hint.
 
 ---
 
@@ -78,10 +78,9 @@ Guardian-specific:
 
 Agent-friendly output:
 
-- Search and article-returning browse modes cap previews at 2,000 words. Each article renders its explicit `truncated` state; when true, call `guardian_get_article` with its `id` as `article_id` for complete HTML-stripped text without a word cap.
+- Search and article-returning browse modes cap previews at 2,000 words and set `truncated`; call `guardian_get_article` for the full text
 - Typed error reasons across all three tools, each paired with a recovery hint
 - `total` / `page` / `pages` on every paginated response so callers can track result scope
-- Declared recovery hints on error responses, with a request ID for matching server logs
 
 ---
 
