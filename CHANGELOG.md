@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.3.0](changelog/0.3.x/0.3.0.md) — 2026-11-11 · ⚠️ Breaking
+
+Find Guardian articles by URL or filter, scan results with optional body previews, and read article text with paragraph and table structure preserved.
+
 ## [0.2.0](changelog/0.2.x/0.2.0.md) — 2026-10-16 · ⚠️ Breaking
 
 Complete article retrieval with explicit tool names and actionable Guardian errors.
