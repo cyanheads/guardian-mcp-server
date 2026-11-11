@@ -275,22 +275,29 @@ describe('guardianSearchArticles', () => {
       expect(text).toContain('This is the article body text.');
     });
 
-    it('shows truncation note when truncated is true', () => {
+    it('renders the continuation already carried by a truncated body once', () => {
       const truncatedResult = {
         ...sampleSearchResult,
-        results: [{ ...sampleArticle, truncated: true }],
+        results: [
+          {
+            ...sampleArticle,
+            body: 'Preview.\n\n[Use guardian_get_article to continue.]',
+            truncated: true,
+          },
+        ],
       };
       const text = textOf(guardianSearchArticles.format!(truncatedResult));
-      expect(text).toContain('guardian_get_article');
+      expect(text.match(/guardian_get_article/g)).toHaveLength(1);
     });
 
-    it('notes absent body for non-article content types', () => {
+    it('omits body text and placeholder when the row carries no body', () => {
       const noBodyResult = {
         ...sampleSearchResult,
         results: [{ ...sampleArticle, body: undefined }],
       };
       const text = textOf(guardianSearchArticles.format!(noBodyResult));
-      expect(text).toContain('not available');
+      expect(text).not.toContain('not available');
+      expect(text).not.toContain('This is the article body text.');
     });
   });
 });

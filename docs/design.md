@@ -10,9 +10,9 @@
 
 | Name | Description | Key Inputs | Annotations |
 |:-----|:------------|:-----------|:------------|
-| `guardian_search_articles` | Full-text search across The Guardian's archive (1999–present) with optional section/tag/date filters. Returns article body previews capped at 2,000 words. | `query`, `section?`, `tag?`, `contributor?`, `from_date?`, `to_date?`, `order_by?`, `page?`, `page_size?` | `readOnlyHint: true` |
+| `guardian_search_articles` | Full-text search across The Guardian's archive (1999–present) with optional section/tag/date filters. Defaults to 2,000-word body previews. | `query`, `section?`, `tag?`, `contributor?`, `from_date?`, `to_date?`, `order_by?`, `page?`, `page_size?`, `include_body?` | `readOnlyHint: true` |
 | `guardian_get_article` | Fetch a single Guardian article by its ID (path slug) with full body text and metadata. | `article_id` | `readOnlyHint: true`, `idempotentHint: true` |
-| `guardian_browse_content` | Latest content from a section or tag, or the full list of sections/tags for discovery. Mode controls the operation. | `mode` (`section_latest` \| `tag_latest` \| `list_sections` \| `list_tags`), `section_id?`, `tag_id?`, `query?`, `page_size?`, `page?` | `readOnlyHint: true` |
+| `guardian_browse_content` | Latest content from a section or tag, or section and tag discovery. | `mode` (`section_latest` \| `tag_latest` \| `list_sections` \| `list_tags`), `section_id?`, `tag_id?`, `query?`, `tag_type?`, `page_size?`, `page?`, `include_body?` | `readOnlyHint: true` |
 
 ### Resources
 
@@ -30,7 +30,7 @@ guardian-mcp-server exposes The Guardian's Open Platform API to LLM agents and t
 
 Target audience: researchers, journalists, analysts, educators, and general-purpose AI workflows requiring current-events context or longform journalism for summarization, synthesis, and fact-checking.
 
-Rate limits: 5,000 requests/day, 12 calls/sec on the free (non-commercial) tier.
+The [non-commercial developer key](https://open-platform.theguardian.com/access/) allows up to 1 call per second and 500 calls per day.
 
 ---
 
@@ -84,7 +84,7 @@ Single service — one API, one key, one base URL. All tools share the same serv
 **Upstream endpoint:** `GET https://content.guardianapis.com/search`
 
 **Request params (always sent):**
-- `show-fields=body,headline,byline,thumbnail,wordcount,standfirst`
+- `show-fields=body,headline,byline,thumbnail,wordcount,standfirst`; omit `body` when `include_body` is false.
 - `show-tags=contributor`
 - `format=json`
 - `api-key={GUARDIAN_API_KEY}`
@@ -94,7 +94,7 @@ Single service — one API, one key, one base URL. All tools share the same serv
 ```ts
 z.object({
   query: z.string().describe(
-    'Full-text search query. Supports AND, OR, NOT operators and exact phrases in double quotes. '
+    'Full-text search query. Pass an empty string for filters only. Supports AND, OR, NOT operators and exact phrases in double quotes. '
     + 'Example: "climate change" AND (policy OR legislation)'
   ),
   section: z.string().optional().describe(
@@ -109,7 +109,7 @@ z.object({
   ),
   contributor: z.string().optional().describe(
     'Restrict to articles by this contributor tag ID (e.g. "profile/georgemonbiot"). '
-    + 'Contributor IDs follow the pattern "profile/<slug>". Use guardian_browse_content with '
+    + 'Bare slugs receive the profile/ prefix; tag expressions pass through unchanged. Use guardian_browse_content with '
     + 'mode=list_tags and tag_type=contributor to discover contributor IDs.'
   ),
   from_date: z.string().optional().describe(
@@ -119,16 +119,16 @@ z.object({
     'Return only articles published on or before this date. Format: YYYY-MM-DD (e.g. "2024-03-31").'
   ),
   order_by: z.enum(['newest', 'oldest', 'relevance']).default('relevance').describe(
-    'Sort order. "relevance" ranks by match strength (default when a query is provided). '
+    'Sort order. "relevance" is the default for a nonblank query and falls back to "newest" without one. '
     + '"newest" and "oldest" sort by publication date.'
   ),
   page: z.number().int().min(1).default(1).describe(
     'Page number (1-indexed). Each page returns up to page_size results.'
   ),
   page_size: z.number().int().min(1).max(50).default(10).describe(
-    'Number of results per page (1–50). Keep low (≤10) when requesting full body text to '
-    + 'manage context size. Large bodies can be 10–30KB each.'
+    'Number of results per page (1–50). Set include_body to false to scan larger pages without article text.'
   ),
+  include_body: z.boolean().default(true).describe('Include body previews up to 2,000 words per article.'),
 })
 ```
 
@@ -158,8 +158,7 @@ z.object({
       thumbnail: z.string().optional().describe('URL of the article thumbnail image.'),
       word_count: z.number().int().optional().describe('Article word count.'),
       body: z.string().optional().describe(
-        'Full article body text (HTML stripped). Truncated at 2,000 words with a note if longer. '
-        + 'Use guardian_get_article with this id as article_id for the complete text.'
+        'Article body preview (HTML stripped), up to 2,000 words with a note when truncated. Omitted when include_body is false or Guardian supplies no body text. Use guardian_get_article with this id as article_id for the complete text.'
       ),
       contributors: z.array(z.object({
         id: z.string().describe('Contributor tag ID (use as contributor filter in guardian_search_articles).'),
@@ -190,8 +189,8 @@ errors: [
   {
     reason: 'invalid_date',
     code: JsonRpcErrorCode.ValidationError,
-    when: 'from_date or to_date is not a real calendar date in YYYY-MM-DD format.',
-    recovery: 'Provide real calendar dates in YYYY-MM-DD format, e.g. "2024-01-15".',
+    when: 'A date is invalid or from_date is later than to_date.',
+    recovery: 'Provide real calendar dates in YYYY-MM-DD format with from_date on or before to_date.',
   },
   {
     reason: 'api_error',
@@ -209,15 +208,15 @@ errors: [
 
 ### `guardian_get_article`
 
-**Purpose:** Fetch a single Guardian article by its ID with full body text and all metadata. Use when the agent already has an article ID from `guardian_search_articles` results and wants the complete untruncated text. Powered by The Guardian.
+**Purpose:** Fetch the complete available text and metadata for a Guardian article by its ID or Guardian web URL. Powered by The Guardian.
 
 **Upstream endpoint:** `GET https://content.guardianapis.com/{article_id}`
 
-Note: The single-item endpoint returns `response.content` (not `response.results[]`).
+An article response has `response.content` with the fields needed to normalize one article. Collection responses yield `not_found` for this lookup.
 
 **Request params (always sent):**
-- `show-fields=body,headline,byline,thumbnail,wordcount,standfirst`
-- `show-tags=contributor`
+- `show-fields=body,headline,byline,thumbnail,wordcount,standfirst,firstPublicationDate,lastModified`
+- `show-tags=keyword,series,tone,contributor`
 - `format=json`
 - `api-key={GUARDIAN_API_KEY}`
 
@@ -226,9 +225,7 @@ Note: The single-item endpoint returns `response.content` (not `response.results
 ```ts
 z.object({
   article_id: z.string().describe(
-    'Guardian article ID — the path slug returned in guardian_search_articles results '
-    + '(e.g. "world/2024/mar/01/russia-ukraine-war-latest"). The id field in search results '
-    + 'is the correct value to pass here.'
+    'Use the exact id from guardian_search_articles or guardian_browse_content, or an article URL on theguardian.com or www.theguardian.com.'
   ),
 })
 ```
@@ -241,7 +238,9 @@ z.object({
   type: z.string().describe('Content type (typically "article").'),
   section_id: z.string().describe('Section identifier.'),
   section_name: z.string().describe('Human-readable section name.'),
-  published_date: z.string().describe('Publication date and time (ISO 8601 UTC).'),
+  published_date: z.string().describe('Guardian web publication timestamp (ISO 8601 UTC). This can advance for a live blog.'),
+  first_published_date: z.string().optional().describe('First publication timestamp when available.'),
+  last_modified: z.string().optional().describe('Most recent modification timestamp when available.'),
   headline: z.string().describe('Article headline (HTML stripped).'),
   standfirst: z.string().optional().describe('Sub-headline or article summary (HTML stripped).'),
   byline: z.string().optional().describe('Author attribution (HTML stripped).'),
@@ -249,13 +248,18 @@ z.object({
   thumbnail: z.string().optional().describe('Thumbnail image URL.'),
   word_count: z.number().int().optional().describe('Article word count.'),
   body: z.string().describe(
-    'Complete article body text (HTML stripped), without a word cap. A placeholder indicates absent upstream body.'
+    'Complete article body text (HTML stripped), without a word cap. The placeholder identifies the content type when the body is unavailable.'
   ),
   truncated: z.boolean().describe('False: single-article retrieval returns the complete available body.'),
   contributors: z.array(z.object({
     id: z.string().describe('Contributor tag ID.'),
     name: z.string().describe('Contributor display name.'),
   })).describe('Authors and contributors.'),
+  tags: z.array(z.object({
+    id: z.string().describe('Exact Guardian tag ID for search or browse.'),
+    type: z.enum(['keyword', 'series', 'tone']),
+    name: z.string().describe('Tag display name.'),
+  })).describe('Topic and editorial tags.'),
   pillar_id: z.string().optional().describe('Pillar ID (e.g. "pillar/news", "pillar/sport").'),
   pillar_name: z.string().optional().describe('Pillar display name.'),
 })
@@ -275,8 +279,7 @@ errors: [
     reason: 'not_found',
     code: JsonRpcErrorCode.NotFound,
     when: 'No article exists with the given ID.',
-    recovery: 'Verify the article_id matches an id returned by guardian_search_articles. '
-      + 'IDs follow the pattern "section/YYYY/mon/DD/slug".',
+    recovery: 'Use the exact article_id returned by guardian_search_articles or guardian_browse_content.',
   },
   {
     reason: 'api_error',
@@ -313,12 +316,10 @@ z.object({
     + '"section_latest": newest articles from a section (requires section_id). '
     + '"tag_latest": newest articles carrying a tag (requires tag_id). '
     + '"list_sections": return all Guardian sections for use as section filters. '
-    + '"list_tags": search the tag taxonomy (optional: query, tag_type, section).'
+    + '"list_tags": search the tag taxonomy (optional: query, tag_type, section_id).'
   ),
   section_id: z.string().optional().describe(
-    'Section ID for section_latest mode (e.g. "world", "politics", "science", "environment", '
-    + '"technology", "culture", "sport", "lifeandstyle"). Required for section_latest. '
-    + 'Use list_sections first if unsure of valid IDs.'
+    'Required for section_latest. In list_tags, optionally limit tags to this section.'
   ),
   tag_id: z.string().optional().describe(
     'Tag ID for tag_latest mode (e.g. "environment/climate-crisis", "technology/artificial-intelligence", '
@@ -337,11 +338,11 @@ z.object({
     + 'Omit to return all types.'
   ),
   page_size: z.number().int().min(1).max(50).default(10).describe(
-    'Number of results per page (1–50). Applies to all modes. '
-    + 'For article-returning modes (section_latest, tag_latest), keep ≤10 to manage context size.'
+    'Number of results per page (1–50). list_sections ignores this input. Set include_body to false to scan larger article pages without body text.'
   ),
+  include_body: z.boolean().default(true).describe('Include body previews in section_latest and tag_latest. Discovery modes ignore this input.'),
   page: z.number().int().min(1).default(1).describe(
-    'Page number (1-indexed). Use with total/pages in the response to paginate.'
+    'Page number (1-indexed). list_sections ignores this input.'
   ),
 })
 ```
@@ -374,7 +375,7 @@ z.discriminatedUnion('mode', [
         thumbnail: z.string().optional(),
         word_count: z.number().int().optional(),
         body: z.string().optional().describe(
-          'Article body text (HTML stripped). Truncated at 2,000 words.'
+          'Article body preview (HTML stripped), up to 2,000 words. Omitted when include_body is false or Guardian supplies no body text.'
         ),
         truncated: z.boolean(),
       })
@@ -466,7 +467,7 @@ All tools declare the following shared HTTP reasons inline, in addition to their
 
 | HTTP outcome | Reason | Code | Retryable | Recovery |
 |:--|:--|:--|:--|:--|
-| 400 | `request_rejected` | `InvalidParams` | false | Correct parameters or requested page |
+| 400 | `request_rejected` | `InvalidParams` | false | Use the exact article ID for detail. For pagination, use an earlier page or narrow the date range, section, or tag filters. Guardian can reject paging past 38,000 results even within the reported page count. |
 | 401 | `unauthorized` | `Unauthorized` | false | Check `GUARDIAN_API_KEY` |
 | 402/403 | `access_denied` | `Forbidden` | false | Check key permissions and access limits |
 | 404 | `not_found` for articles, `section_not_found` for sections, otherwise `request_not_found` | `NotFound` | false | Verify the identifier or operation |
@@ -478,7 +479,7 @@ All tools declare the following shared HTTP reasons inline, in addition to their
 | 501 | `api_unsupported` | `ServiceUnavailable` | false | Change the unsupported request |
 | Other 5xx | `api_error` | `ServiceUnavailable` | true | Retry after a short delay |
 
-`from_date` and `to_date` accept real `YYYY-MM-DD` calendar dates, checked locally with Gregorian leap-year arithmetic; blank bounds are omitted. Invalid dates retain `invalid_date` / `ValidationError` and make no upstream request. Tag expressions pass through unchanged: `environment/climate-crisis|environment/flooding` selects either tag. With `contributor: "profile/georgemonbiot"`, explicitly group the tag expression as `(environment/climate-crisis|environment/flooding)` because the service comma-joins the filters. Browse `tag_latest` accepts the same syntax in `tag_id`.
+`from_date` and `to_date` accept real `YYYY-MM-DD` dates. Blank bounds are omitted. Invalid dates and inverted ranges return `invalid_date` without an upstream request. Tag expressions pass through unchanged. Group a compound tag expression when also using `contributor`, since the service comma-joins the filters. Browse `tag_latest` accepts the same syntax in `tag_id`. Upstream error bodies are redacted and stay server-side.
 
 ### `guardian-service` (`src/services/guardian/`)
 
@@ -489,7 +490,7 @@ All tools declare the following shared HTTP reasons inline, in addition to their
 **Responsibilities:**
 - HTTP client wrapping `fetchWithTimeout` + `withRetry` from `@cyanheads/mcp-ts-core/utils`
 - Injects `api-key`, `format=json`, and `show-fields` params on all content-returning requests
-- Strips HTML from `body`, `headline`, `standfirst`, `byline` fields (use a lightweight regex-based stripper — no DOM parser dependency). Live probe confirms `body` and `standfirst` contain HTML (`<p>`, `<ul>`, `<li>`, `<a>`, `<strong>` etc.); `headline` and `byline` may come back plain but strip defensively.
+- Strips HTML from `body`, `headline`, `standfirst`, and `byline`. Body text preserves paragraph breaks and renders tables with one line per row and ` | ` between cells. Formatters escape literal CommonMark prose and render URLs and thumbnails as links and images.
 - Caps search/section/tag previews at 2,000 words, appending `\n\n[Article truncated at 2,000 words. Use guardian_get_article with article_id "${id}" to retrieve the full text.]`. Single-article normalization strips HTML without truncating.
 - Parses `wordcount` from string (the API returns it as `String (Integer)`) to `number`
 - Extracts `show-fields` values from the nested `fields: {}` sub-object in each result (confirmed live: `headline`, `standfirst`, `byline`, `body`, `wordcount`, `thumbnail` all nest under `fields`, not at the result root)
@@ -557,8 +558,6 @@ All tools declare the following shared HTTP reasons inline, in addition to their
 
 **Pagination:** `page` (1-indexed) and `page-size` (1–50). Deep pagination beyond a few thousand results requires the `/next` cursor endpoint — out of scope for this server's design.
 
-**Rate limits:** 5,000 requests/day, 12 calls/sec on the free tier.
-
 **Tag `type` values:** `keyword`, `contributor`, `blog`, `series`, `tone`, `newspaper-book`, `newspaper-book-section`, `type`, `publication`
 
 **`order-by` values:** `newest` (default for browse), `oldest`, `relevance` (default when `q` is present)
@@ -571,7 +570,7 @@ All tools declare the following shared HTTP reasons inline, in addition to their
 Sections and tags share the same browse/discovery purpose and usage pattern (discover IDs before filtering), so `guardian_browse_content` groups their operations under a `mode` enum. The surface has three tools: search articles, retrieve one complete article, and browse or discover content.
 
 **2. `show-fields` by default on all article-returning tools.**
-Every tool that returns articles requests `show-fields=body,headline,byline,thumbnail,wordcount,standfirst` unconditionally. The server's value proposition is full article text; stripping the body to save tokens defeats the purpose. Callers who want metadata-only can use `guardian_browse_content mode=list_sections` or `list_tags`.
+Search and article browse request body previews by default. `include_body: false` omits the upstream body field and each result's body while retaining the remaining metadata and pagination. Detail always requests the full available body.
 
 **3. Batch previews at 2,000 words with complete detail retrieval.**
 Search and article-returning browse modes cap each body at 2,000 words to bound batch output. Both client surfaces disclose `truncated` explicitly. The continuation names `article_id` for `guardian_get_article`, which returns complete HTML-stripped upstream text without a word cap. No pagination or second upstream request is needed to retrieve one article.
@@ -582,8 +581,8 @@ The Guardian API returns HTML in `body`, `headline`, `standfirst`, and `byline`.
 **5. `contributor` as a first-class `guardian_search_articles` param.**
 The Guardian tag system encodes contributors as `type=contributor` tags under the `profile/` namespace. Exposing `contributor` separately from the generic `tag` parameter gives the common case a clear label and saves the caller from knowing the Guardian tag-type system. The service layer maps it to a `tag=profile/{slug}` API param.
 
-**6. `guardian_browse_content mode=tag_latest` routes to `/search?tag=` not `/{tag_id}`.**
-The Guardian's section endpoint (`/{section_id}`) supports browsing latest content. Tags don't have an equivalent direct endpoint — fetching latest content by tag requires `/search?tag=`. The service abstracts this routing detail; both modes surface the same article shape.
+**6. Article browse uses two upstream routes.**
+`section_latest` uses the single-item path and validates a section, edition, or tag marker alongside the article results array. `tag_latest` uses `/search?tag=` to support compound tag expressions. Both modes surface the same article shape.
 
 **7. No `page_size` knob for `list_sections`.**
 Sections return the full list in one call (around 50–100 sections, no pagination in practice). Sections are not paginated in the API response and the full list fits easily in one response. The `page_size` input is accepted but only meaningful for paginated modes — `list_sections` ignores it cleanly.
@@ -601,10 +600,10 @@ The server doesn't enforce the non-commercial restriction (it has no mechanism t
 - **Free tier is non-commercial only.** Commercial use requires a separate agreement with The Guardian. The server cannot enforce this.
 - **Pagination depth.** Deep pagination (beyond ~2,500 results) requires the `/next` cursor endpoint, which this server does not expose. For deep historical research, use narrow `from_date`/`to_date` windows to stay within the page-based limit.
 - **`wordcount` is string-typed.** The API returns `wordcount` as `String (Integer)`. The service layer parses it; absent values map to `undefined`, not `0`.
-- **`body` may be absent.** Some content types (live blogs, galleries, interactive features) may not populate the `body` field even with `show-fields=body`. The output schema marks `body` as optional; the formatted output notes when it is absent.
-- **HTML in fields.** Some HTML tags may remain after stripping if they contain nested structures the regex stripper doesn't handle (e.g., complex table markup). Field-testing should verify the stripper handles common Guardian article patterns.
+- **Body availability.** Search and browse omit the body preview when `include_body` is false or Guardian supplies no body text. Article detail returns a placeholder that names the content type when the body is unavailable.
+- **HTML in fields.** Plain-text conversion preserves block boundaries and table rows. Complex table layouts can lose visual structure.
 - **No `/next` cursor pagination.** The design uses page-number pagination only. The Guardian's cursor-based `/next` endpoint for deep pagination is out of scope.
-- **Rate limit has no server-side enforcement.** The server does not track or throttle request rates. Callers consuming the server at high volume are responsible for staying within 12 calls/sec and 5,000/day.
+- **Rate limit has no server-side enforcement.** The server does not track or throttle request rates. Callers must stay within their [Guardian API key limits](https://open-platform.theguardian.com/access/).
 
 ---
 
@@ -631,7 +630,7 @@ The design review performed live probing using the Guardian's public test key (`
 
 | Field | Status | Finding |
 |:------|:-------|:--------|
-| `body` HTML structure | **Confirmed** | Uses `<p>`, `<ul>`, `<li>`, `<a href="...">`, `<strong>`. Standard paragraph HTML. Regex stripper must handle these at minimum. Field is nested under `result.fields.body`. |
+| `body` HTML structure | **Confirmed** | Uses `<p>`, `<ul>`, `<li>`, `<a href="...">`, `<strong>`. Field is nested under `result.fields.body`. |
 | `show-fields` nesting | **Confirmed** | `headline`, `standfirst`, `byline`, `body`, `wordcount`, `thumbnail` are all nested under a `fields: {}` sub-object on each result — not flat at the result root. Service must extract them. |
 | `wordcount` type | **Confirmed** | Returns as `"495"` (string). Parse to number. |
 | `standfirst` HTML | **Confirmed** | Contains HTML (`<ul><li>...`). Must be stripped. |

@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.2.0-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/guardian-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-%5E2.3.1-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/guardian-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/guardian-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-%5E7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.3-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.2.0-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/guardian-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-%5E2.4.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/guardian-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/guardian-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-%5E7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.4-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -39,28 +39,29 @@ The Guardian's journalism archive, 1999 to today. Search full text, browse by se
 
 ### `guardian_search_articles` <sub>tool</sub>
 
-- Boolean `query` syntax (`AND`/`OR`/`NOT`, quoted phrases), optional `section`/`tag`/`contributor` and `from_date`/`to_date` (`YYYY-MM-DD`) filters; `order_by`: `relevance` (default), `newest`, or `oldest`; `page` + `page_size` (1–50, default 10)
-- Articles carry metadata, HTML-stripped body text and a `truncated` flag; results include `total`, `page`, `pages`, `page_size`, and `order_by`
-- Fails with `no_results` or `invalid_date` (dates must be real calendar dates)
+- `query` supports `AND`/`OR`/`NOT` and quoted phrases. Pass an empty string to search by filters alone. The default `relevance` sort falls back to `newest` for a blank query, with a notice. You can also select `newest` or `oldest` explicitly.
+- Filter by `section`, `tag`, `contributor`, `from_date`, or `to_date`. Bare contributor slugs receive the `profile/` prefix. Dates use `YYYY-MM-DD` and must form a valid range.
+- `page_size` accepts 1–50 (default 10). Set `include_body: false` to omit article previews from the request and results. Results include `total`, `page`, `pages`, `page_size`, and the applied `order_by`.
+- Fails with `no_results` when no articles match the active filters or `invalid_date` for an invalid date or inverted range.
 - `tag` accepts comma (AND), pipe `|` (OR), hyphen `-` (NOT), and parentheses, e.g. `environment/climate-crisis|environment/flooding`. Wrap an OR expression in parentheses when also passing `contributor`.
 
 ---
 
 ### `guardian_get_article` <sub>tool</sub>
 
-- Required `article_id`: the path-slug `id` returned by `guardian_search_articles` or `guardian_browse_content`
-- Returns HTML-stripped body text, metadata, contributors, pillar/section classification, and `truncated`
+- Pass the exact article `id` as `article_id`, or pass an article URL on `theguardian.com` or `www.theguardian.com`.
+- Returns the complete available body text, contributors, section and pillar metadata, and exact keyword, series, and tone tags usable in search and browse. Includes `first_published_date` and `last_modified` when available. The `published_date` field is the Guardian web publication timestamp and can advance for a live blog.
 - Fails with `not_found`
 
 ---
 
 ### `guardian_browse_content` <sub>tool</sub>
 
-- Four `mode` values: `section_latest` (requires `section_id`), `tag_latest` (requires `tag_id`), `list_sections`, `list_tags`; `page` + `page_size` (1–50, default 10) for articles and tags
-- `list_tags` filters by optional `query` and `tag_type` (`keyword`, `contributor`, `blog`, `series`, `tone`, `type`, `publication`, `newspaper-book`, `newspaper-book-section`); output carries `mode`, `total`, and the matching `results`/`sections`/`tags` array
+- `section_latest` requires `section_id` and accepts section, edition, and tag paths. `tag_latest` requires `tag_id`. Both return body previews by default. Set `include_body: false` for article metadata only.
+- `list_tags` filters by optional `query`, `tag_type`, and `section_id`. `list_sections` returns all matching sections and ignores `page` and `page_size`. Paginated modes accept `page_size` from 1–50 (default 10).
 - Fails with `missing_section_id`, `missing_tag_id`, `section_not_found`, or `tag_not_found`. `tag_id` accepts the same boolean expressions as search's `tag`.
 
-All three tools also fail with status-specific HTTP errors. Not retryable: `unauthorized` (401), `access_denied` (403), `request_rejected` (400), `validation_failed` (422), `invalid_request`, `request_conflict`, `request_not_found`, and `api_unsupported` (501). Retryable: `api_timeout` (408/425/504), `rate_limited` (429), and `api_error` (other 5xx). Each error carries a recovery hint.
+All three tools also fail with status-specific HTTP errors. Not retryable: `unauthorized` (401), `access_denied` (403), `request_rejected` (400), `validation_failed` (422), `invalid_request`, `request_conflict`, `request_not_found`, and `api_unsupported` (501). Retryable: `api_timeout` (408/425/504), `rate_limited` (429), and `api_error` (other 5xx). Each error carries a recovery hint. Guardian can reject paging past 38,000 results even within the reported page count.
 
 ---
 
@@ -74,7 +75,7 @@ Guardian-specific:
 - Full body text extraction — HTML stripped, not just headlines or abstracts
 - Contributor ID discovery via `guardian_browse_content` mode `list_tags` with `tag_type=contributor`
 - Section and tag taxonomy browsing (`list_sections`, `list_tags`) for filter discovery before searching
-- Free tier: 5,000 requests/day, 12 calls/second — the server applies no additional throttling
+- [Developer key limits](https://open-platform.theguardian.com/access/) are up to 1 call per second and 500 calls per day. The server applies no additional throttling.
 
 Agent-friendly output:
 
@@ -152,7 +153,7 @@ MCP_TRANSPORT_TYPE=http MCP_HTTP_PORT=3010 GUARDIAN_API_KEY=your-api-key bun run
 
 ### Prerequisites
 
-- [Bun v1.4.0](https://bun.sh/) or higher (or Node.js v24+).
+- [Bun v1.4.4](https://bun.sh/) or higher (or Node.js v24+).
 - A free Guardian Open Platform API key — register at [open-platform.theguardian.com/access](https://open-platform.theguardian.com/access). The non-commercial developer tier is free and instant.
 
 ### Installation
@@ -194,7 +195,7 @@ cp .env.example .env
 | `MCP_SESSION_MODE` | HTTP session mode: `stateless`, `stateful`, or `auto` (resolves to `stateful`). The server declares `stateless`; an exported value overrides it. | `stateless` |
 | `MCP_AUTH_MODE` | Auth mode: `none`, `jwt`, or `oauth`. | `none` |
 | `MCP_LOG_LEVEL` | Log level (RFC 5424). | `info` |
-| `LOGS_DIR` | Directory for log files (Node.js only). | `<project-root>/logs` |
+| `LOGS_DIR` | Directory for log files (Node.js only). Relative paths resolve from the server package. | `<server-package>/logs` |
 | `LOG_TOOL_FAILURE_PAYLOADS` | Log failed tool arguments and results, redacted by key name and capped by `LOG_TOOL_FAILURE_PAYLOAD_MAX_BYTES` (default `16384`). Secrets in free-form values remain visible. | `false` |
 | `STORAGE_PROVIDER_TYPE` | Storage backend. | `in-memory` |
 | `OTEL_ENABLED` | Enable [OpenTelemetry instrumentation](https://github.com/cyanheads/mcp-ts-core/tree/main/docs/telemetry) (spans, metrics, completion logs). | `false` |

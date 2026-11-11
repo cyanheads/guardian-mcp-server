@@ -8,20 +8,21 @@ import type { Context } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode, McpError, serviceUnavailable } from '@cyanheads/mcp-ts-core/errors';
 import { fetchWithTimeout, withRetry } from '@cyanheads/mcp-ts-core/utils';
 import { getServerConfig } from '@/config/server-config.js';
-import type {
-  NormalizedArticle,
-  NormalizedSearchResult,
-  NormalizedSection,
-  NormalizedSectionsResult,
-  NormalizedTag,
-  NormalizedTagsResult,
-  RawContentItem,
-  RawSearchResponse,
-  RawSectionsResponse,
-  RawSingleContent,
-  RawSingleResponse,
-  RawTag,
-  RawTagsResponse,
+import {
+  ArticleTagTypeSchema,
+  type NormalizedArticle,
+  type NormalizedArticleDetail,
+  type NormalizedSearchResult,
+  type NormalizedSection,
+  type NormalizedSectionsResult,
+  type NormalizedTag,
+  type NormalizedTagsResult,
+  type RawContentItem,
+  type RawSearchResponse,
+  RawSectionContentResponseSchema,
+  type RawSectionsResponse,
+  RawSingleResponseSchema,
+  type RawTagsResponse,
 } from './types.js';
 
 const BASE_URL = 'https://content.guardianapis.com';
@@ -29,7 +30,8 @@ const TIMEOUT_MS = 10_000;
 const WORD_LIMIT = 2_000;
 
 /** Shared show-fields param for all article-returning endpoints. */
-const SHOW_FIELDS = 'body,headline,byline,thumbnail,wordcount,standfirst';
+const METADATA_FIELDS = 'headline,byline,thumbnail,wordcount,standfirst';
+const SHOW_FIELDS = `body,${METADATA_FIELDS}`;
 
 // ---------------------------------------------------------------------------
 // HTML stripping
@@ -48,6 +50,22 @@ const NAMED_ENTITIES = new Map([
 ]);
 
 const ENTITY_PATTERN = /&(#[xX][0-9a-fA-F]+|#\d+|[a-zA-Z][a-zA-Z0-9]*);/g;
+const BLOCK_TAGS = new Set([
+  'p',
+  'div',
+  'li',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'blockquote',
+  'figure',
+  'aside',
+  'section',
+  'article',
+]);
 
 /** Decode one character reference; an unknown name or out-of-range code point stays literal. */
 function decodeEntity(match: string, ref: string): string {
@@ -60,22 +78,103 @@ function decodeEntity(match: string, ref: string): string {
 
 /** Strip HTML tags and decode entities from a string, each character reference exactly once. */
 function stripHtml(html: string): string {
-  return (
-    html
-      // Remove script/style blocks entirely
-      .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, '')
-      // Replace block-level elements with newlines
-      .replace(/<\/(p|div|li|h[1-6]|blockquote|figure|aside|section|article|br)>/gi, '\n')
-      // Replace <br> self-closing
-      .replace(/<br\s*\/?>/gi, '\n')
-      // Strip remaining tags
-      .replace(/<[^>]+>/g, '')
-      // Decode entities in one pass, so an `&` a decode produces is never decoded again
-      .replace(ENTITY_PATTERN, decodeEntity)
-      // Collapse excess whitespace / blank lines
-      .replace(/\n{3,}/g, '\n\n')
-      .trim()
-  );
+  const output: string[] = [];
+  const tagStart = /<(?:!--|[!?]|\/?([a-z][^\t\n\f\r /<>"'=]*)(?=[\t\n\f\r />]))/gi;
+  const commentEnd = /--!?>/g;
+  let tableDepth = 0;
+  let row: string[] = [];
+  let cell: string[] | undefined;
+  let inCaption = false;
+  let offset = 0;
+
+  function finishCell(): void {
+    if (!cell) return;
+    row.push(cell.join('').replace(/\s+/g, ' ').trim());
+    cell = undefined;
+  }
+
+  function finishRow(): void {
+    finishCell();
+    if (row.length === 0) return;
+    output.push(row.join(' | '), '\n');
+    row = [];
+  }
+
+  for (let tag = tagStart.exec(html); tag; tag = tagStart.exec(html)) {
+    const destination = tableDepth && !inCaption ? cell : output;
+    if (tag[0] === '<!--') {
+      if (tag.index > offset) destination?.push(html.slice(offset, tag.index));
+      commentEnd.lastIndex = tagStart.lastIndex;
+      offset = commentEnd.exec(html) ? commentEnd.lastIndex : html.length;
+      tagStart.lastIndex = offset;
+      continue;
+    }
+
+    let end = tagStart.lastIndex;
+    // Skip quoted attributes before testing for a tag boundary.
+    while (end < html.length && html[end] !== '>' && html[end] !== '<') {
+      const character = html[end];
+      if (character === '"' || character === "'") {
+        const quoteEnd = html.indexOf(character, end + 1);
+        end = quoteEnd === -1 ? html.length : quoteEnd + 1;
+      } else {
+        end++;
+      }
+    }
+    tagStart.lastIndex = end;
+    if (html[end] !== '>') continue;
+
+    if (tag.index > offset) destination?.push(html.slice(offset, tag.index));
+    offset = end + 1;
+    tagStart.lastIndex = offset;
+
+    const name = tag[1]?.toLowerCase();
+    const closing = tag[0][1] === '/';
+    const cellBoundary = name === 'th' || name === 'td';
+    const rowBoundary =
+      name === 'tr' || (closing && (name === 'thead' || name === 'tbody' || name === 'tfoot'));
+    if (!closing && (name === 'script' || name === 'style')) {
+      const rawEnd =
+        name === 'script' ? /<\/script[\t\n\f\r ]*\/?>/gi : /<\/style[\t\n\f\r ]*\/?>/gi;
+      rawEnd.lastIndex = offset;
+      offset = rawEnd.exec(html) ? rawEnd.lastIndex : html.length;
+      tagStart.lastIndex = offset;
+    } else if (name === 'table') {
+      if (!closing) {
+        destination?.push('\n');
+        tableDepth++;
+      } else if (tableDepth > 0) {
+        if (tableDepth === 1) {
+          finishRow();
+          inCaption = false;
+        }
+        tableDepth--;
+        (tableDepth === 0 ? output : destination)?.push('\n');
+      }
+    } else if (tableDepth === 1 && name === 'caption') {
+      inCaption = !closing;
+      if (closing) output.push('\n');
+    } else if (tableDepth === 1 && cellBoundary) {
+      finishCell();
+      if (!closing) cell = [];
+    } else if (tableDepth === 1 && rowBoundary) {
+      finishRow();
+    } else if (tableDepth > 1 && (cellBoundary || rowBoundary || name === 'caption')) {
+      // Nested tables contribute text to the outer cell without changing its columns.
+      destination?.push(' ');
+    } else if (name === 'br') {
+      destination?.push('\n');
+    } else if (name !== undefined && BLOCK_TAGS.has(name)) {
+      const last = destination?.at(-1);
+      if (closing || (last && !last.endsWith('\n'))) destination?.push('\n');
+    }
+  }
+  if (tableDepth === 0) output.push(html.slice(offset));
+  return output
+    .join('')
+    .replace(ENTITY_PATTERN, decodeEntity)
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 // ---------------------------------------------------------------------------
@@ -84,52 +183,48 @@ function stripHtml(html: string): string {
 
 /** Truncate body text at WORD_LIMIT words, appending a note with the article ID. */
 function truncateBody(text: string, articleId: string): { body: string; truncated: boolean } {
-  const words = text.split(/\s+/);
-  if (words.length <= WORD_LIMIT) {
-    return { body: text, truncated: false };
+  let count = 0;
+  let end = 0;
+  for (const word of text.matchAll(/\S+/g)) {
+    if (word[0] === '|') continue;
+    if (count === WORD_LIMIT) {
+      return {
+        body: `${text.slice(0, end)}\n\n[Article truncated at 2,000 words. Use guardian_get_article with article_id "${articleId}" to retrieve the full text.]`,
+        truncated: true,
+      };
+    }
+    count++;
+    end = word.index + word[0].length;
   }
-  const truncated = words.slice(0, WORD_LIMIT).join(' ');
-  return {
-    body:
-      truncated +
-      `\n\n[Article truncated at 2,000 words. Use guardian_get_article with article_id "${articleId}" to retrieve the full text.]`,
-    truncated: true,
-  };
+  return { body: text, truncated: false };
 }
 
 // ---------------------------------------------------------------------------
 // Normalization helpers
 // ---------------------------------------------------------------------------
 
-function normalizeContributors(tags?: RawTag[]): Array<{ id: string; name: string }> {
+function normalizeContributors(tags: RawContentItem['tags']): Array<{ id: string; name: string }> {
   if (!tags) return [];
   return tags.filter((t) => t.type === 'contributor').map((t) => ({ id: t.id, name: t.webTitle }));
 }
 
 function normalizeArticle(
-  raw: RawContentItem | RawSingleContent,
-  preview = true,
+  raw: RawContentItem,
+  bodyMode: 'preview' | 'full' | 'omit',
 ): NormalizedArticle {
   const fields = raw.fields ?? {};
 
-  const rawHeadlineStr = fields.headline ?? '';
-  const headline = rawHeadlineStr ? stripHtml(rawHeadlineStr) : '';
+  const headline = fields.headline ? stripHtml(fields.headline) : '';
   const standfirst = fields.standfirst ? stripHtml(fields.standfirst) : undefined;
   const byline = fields.byline ? stripHtml(fields.byline) : undefined;
-  const strippedBody = fields.body ? stripHtml(fields.body) : undefined;
+  const strippedBody = bodyMode !== 'omit' && fields.body ? stripHtml(fields.body) : undefined;
   const word_count = fields.wordcount
     ? Number.parseInt(fields.wordcount, 10) || undefined
     : undefined;
 
-  let body: string | undefined;
-  let truncated = false;
-  if (strippedBody) {
-    const result = preview
-      ? truncateBody(strippedBody, raw.id)
-      : { body: strippedBody, truncated: false };
-    body = result.body;
-    truncated = result.truncated;
-  }
+  const preview =
+    strippedBody && bodyMode === 'preview' ? truncateBody(strippedBody, raw.id) : undefined;
+  const body = preview?.body ?? strippedBody;
 
   return {
     id: raw.id,
@@ -143,8 +238,8 @@ function normalizeArticle(
     web_url: raw.webUrl,
     ...(fields.thumbnail !== undefined && { thumbnail: fields.thumbnail }),
     ...(word_count !== undefined && { word_count }),
-    ...(body !== undefined && { body }),
-    truncated,
+    ...(body && { body }),
+    truncated: preview?.truncated ?? false,
     contributors: normalizeContributors(raw.tags),
     ...(raw.pillarId !== undefined && { pillar_id: raw.pillarId }),
     ...(raw.pillarName !== undefined && { pillar_name: raw.pillarName }),
@@ -168,13 +263,56 @@ function buildUrl(path: string, params: Record<string, string | number | undefin
   return url.toString();
 }
 
-/** Detect and throw on HTML error-page responses from the API. */
-function assertNotHtmlPage(text: string): void {
+/** A wrong endpoint shape or an unusable identifier is a nonretryable lookup miss. */
+function lookupMiss(reason: 'not_found' | 'section_not_found'): McpError {
+  const message =
+    reason === 'not_found'
+      ? 'Guardian article not found. Use the exact article_id returned by guardian_search_articles.'
+      : 'Guardian section not found. Verify the section_id.';
+  return new McpError(JsonRpcErrorCode.NotFound, message, { reason, retryable: false });
+}
+
+/** Decode a completed lookup response, mapping malformed JSON to a nonretryable miss. */
+function parseLookupJson(text: string, reason: 'not_found' | 'section_not_found'): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw lookupMiss(reason);
+  }
+}
+
+/** Encode bare IDs as path segments and use only the pathname from Guardian web URLs. */
+function lookupPath(id: string, reason: 'not_found' | 'section_not_found'): string {
+  if (id.startsWith('//') || /^[a-z][a-z0-9+.-]*:/i.test(id)) {
+    const url = URL.parse(id);
+    if (
+      reason !== 'not_found' ||
+      !url ||
+      (url.protocol !== 'https:' && url.protocol !== 'http:') ||
+      (url.hostname !== 'www.theguardian.com' && url.hostname !== 'theguardian.com') ||
+      url.pathname === '/'
+    )
+      throw lookupMiss(reason);
+    return url.pathname;
+  }
+
+  const segments = id.replace(/^\//, '').split('/');
+  if (!id || segments.some((segment) => segment === '.' || segment === '..')) {
+    throw lookupMiss(reason);
+  }
+  return `/${segments.map((segment) => encodeURIComponent(segment.toWellFormed())).join('/')}`;
+}
+
+/** Read the response body inside the retry attempt, including checks for HTML error pages. */
+async function fetchGuardianText(url: string, ctx: Context): Promise<string> {
+  const response = await fetchWithTimeout(url, TIMEOUT_MS, ctx, { signal: ctx.signal });
+  const text = await response.text();
   if (/^\s*<(!DOCTYPE\s+html|html[\s>])/i.test(text)) {
     throw serviceUnavailable(
       'Guardian API returned an HTML page instead of JSON — the service may be temporarily unavailable.',
     );
   }
+  return text;
 }
 
 /** Redact the api-key query parameter from URLs in error messages. */
@@ -188,7 +326,10 @@ function redactApiKey(message: string): string {
  * tool's declared recovery hint. Always redacts the API key from the message before
  * rethrowing, even when the error already carries a reason.
  */
-function annotateHttpError(err: unknown, opts: { notFoundReason?: string } = {}): never {
+function annotateHttpError(
+  err: unknown,
+  opts: { notFoundReason?: string; badRequestHint?: string } = {},
+): never {
   if (!(err instanceof McpError)) throw err;
   const data = err.data;
   const status = data?.status ?? data?.statusCode;
@@ -246,9 +387,19 @@ function annotateHttpError(err: unknown, opts: { notFoundReason?: string } = {})
               ? `Guardian API temporarily unavailable (HTTP ${status}).`
               : status === 501
                 ? 'Guardian API does not support this request (HTTP 501).'
-                : `Guardian API rejected the request (HTTP ${status}). Check the parameters and requested page.`;
+                : status === 400 && opts.badRequestHint
+                  ? `Guardian API rejected the request (HTTP 400). ${opts.badRequestHint}`
+                  : `Guardian API rejected the request (HTTP ${status}). Check the parameters and requested page.`;
   const body = data?.body ?? data?.responseBody;
+  // Carry the framework's server-only field marker without exposing extra fetch diagnostics.
+  const metadata = Object.fromEntries(
+    Object.getOwnPropertySymbols(data ?? {}).map((key) => [
+      key,
+      Object.getOwnPropertyDescriptor(data ?? {}, key)?.value,
+    ]),
+  );
   throw new McpError(err.code, message, {
+    ...metadata,
     status,
     ...(typeof body === 'string' && {
       body: redactApiKey(body).replaceAll(getServerConfig().apiKey, '[REDACTED]'),
@@ -277,33 +428,37 @@ export class GuardianService {
       order_by?: string;
       page?: number;
       page_size?: number;
+      include_body?: boolean;
     },
     ctx: Context,
   ): Promise<NormalizedSearchResult> {
     // Build tag param: merge tag + contributor (contributor is a tag under profile/ namespace)
-    let tagParam: string | undefined = params.tag;
-    if (params.contributor) {
-      tagParam = tagParam ? `${tagParam},${params.contributor}` : params.contributor;
-    }
+    const contributor =
+      params.contributor && /^[a-z0-9][a-z0-9_-]*$/i.test(params.contributor)
+        ? `profile/${params.contributor}`
+        : params.contributor;
+    const tagParam = [params.tag, contributor].filter(Boolean).join(',');
+    const query = params.query.trim() ? params.query : '';
+    const requestedOrder = params.order_by ?? 'relevance';
+    const order = !query && requestedOrder === 'relevance' ? 'newest' : requestedOrder;
+    const includeBody = params.include_body !== false;
 
     const url = buildUrl('/search', {
-      q: params.query,
-      'show-fields': SHOW_FIELDS,
+      q: query,
+      'show-fields': includeBody ? SHOW_FIELDS : METADATA_FIELDS,
       'show-tags': 'contributor',
       section: params.section,
       tag: tagParam,
       'from-date': params.from_date,
       'to-date': params.to_date,
-      'order-by': params.order_by ?? 'relevance',
+      'order-by': order,
       page: params.page ?? 1,
       'page-size': params.page_size ?? 10,
     });
 
     return withRetry(
       async () => {
-        const response = await fetchWithTimeout(url, TIMEOUT_MS, ctx, { signal: ctx.signal });
-        const text = await response.text();
-        assertNotHtmlPage(text);
+        const text = await fetchGuardianText(url, ctx);
         const data = JSON.parse(text) as RawSearchResponse;
         const r = data.response;
 
@@ -312,8 +467,8 @@ export class GuardianService {
           page: r.currentPage,
           pages: r.pages,
           page_size: r.results.length,
-          order_by: r.orderBy ?? params.order_by ?? 'relevance',
-          results: r.results.map((raw) => normalizeArticle(raw)),
+          order_by: r.orderBy ?? order,
+          results: r.results.map((raw) => normalizeArticle(raw, includeBody ? 'preview' : 'omit')),
         };
       },
       {
@@ -322,70 +477,90 @@ export class GuardianService {
         baseDelayMs: 500,
         signal: ctx.signal,
       },
-    ).catch((err) => annotateHttpError(err));
+    ).catch((err) =>
+      annotateHttpError(err, {
+        badRequestHint:
+          'Check the filters and use an earlier page. Guardian can reject paging past 38,000 results even within the reported page count.',
+      }),
+    );
   }
 
-  /** Fetch a single article by its path-slug ID. */
-  getContent(articleId: string, ctx: Context): Promise<NormalizedArticle> {
-    const url = buildUrl(`/${articleId}`, {
-      'show-fields': SHOW_FIELDS,
-      'show-tags': 'contributor',
+  /** Fetch a single article by its ID or Guardian web URL. */
+  async getContent(articleId: string, ctx: Context): Promise<NormalizedArticleDetail> {
+    const url = buildUrl(lookupPath(articleId, 'not_found'), {
+      'show-fields': `${SHOW_FIELDS},firstPublicationDate,lastModified`,
+      'show-tags': 'keyword,series,tone,contributor',
     });
 
-    return withRetry(
-      async () => {
-        const response = await fetchWithTimeout(url, TIMEOUT_MS, ctx, { signal: ctx.signal });
-        const text = await response.text();
-        assertNotHtmlPage(text);
-        const data = JSON.parse(text) as RawSingleResponse;
-        return normalizeArticle(data.response.content, false);
-      },
-      {
-        operation: 'GuardianService.getContent',
-        context: ctx,
-        baseDelayMs: 500,
-        signal: ctx.signal,
-      },
-    ).catch((err) => annotateHttpError(err, { notFoundReason: 'not_found' }));
+    const text = await withRetry(() => fetchGuardianText(url, ctx), {
+      operation: 'GuardianService.getContent',
+      context: ctx,
+      baseDelayMs: 500,
+      signal: ctx.signal,
+    }).catch((err) =>
+      annotateHttpError(err, {
+        notFoundReason: 'not_found',
+        badRequestHint: 'Use the exact article_id returned by guardian_search_articles.',
+      }),
+    );
+
+    const data = RawSingleResponseSchema.safeParse(parseLookupJson(text, 'not_found'));
+    if (!data.success) throw lookupMiss('not_found');
+    const { content } = data.data.response;
+    const { firstPublicationDate, lastModified } = content.fields ?? {};
+    const tags: NormalizedArticleDetail['tags'] = [];
+    for (const tag of content.tags ?? []) {
+      const type = ArticleTagTypeSchema.safeParse(tag.type);
+      if (type.success) tags.push({ id: tag.id, type: type.data, name: tag.webTitle });
+    }
+    return {
+      ...normalizeArticle(content, 'full'),
+      tags,
+      ...(firstPublicationDate && { first_published_date: firstPublicationDate }),
+      ...(lastModified && { last_modified: lastModified }),
+    };
   }
 
   /** Fetch latest content from a section ID. */
-  getSectionContent(
+  async getSectionContent(
     sectionId: string,
-    pageParams: { page?: number; page_size?: number },
+    pageParams: { page?: number; page_size?: number; include_body?: boolean },
     ctx: Context,
   ): Promise<NormalizedSearchResult> {
-    const url = buildUrl(`/${sectionId}`, {
-      'show-fields': SHOW_FIELDS,
+    const includeBody = pageParams.include_body !== false;
+    const url = buildUrl(lookupPath(sectionId, 'section_not_found'), {
+      'show-fields': includeBody ? SHOW_FIELDS : METADATA_FIELDS,
       'show-tags': 'contributor',
       page: pageParams.page ?? 1,
       'page-size': pageParams.page_size ?? 10,
     });
 
-    return withRetry(
-      async () => {
-        const response = await fetchWithTimeout(url, TIMEOUT_MS, ctx, { signal: ctx.signal });
-        const text = await response.text();
-        assertNotHtmlPage(text);
-        const data = JSON.parse(text) as RawSearchResponse;
-        const r = data.response;
+    const text = await withRetry(() => fetchGuardianText(url, ctx), {
+      operation: 'GuardianService.getSectionContent',
+      context: ctx,
+      baseDelayMs: 500,
+      signal: ctx.signal,
+    }).catch((err) =>
+      annotateHttpError(err, {
+        notFoundReason: 'section_not_found',
+        badRequestHint:
+          'Use an earlier page or a narrower section. Guardian can reject paging past 38,000 results even within the reported page count.',
+      }),
+    );
 
-        return {
-          total: r.total,
-          page: r.currentPage,
-          pages: r.pages,
-          page_size: r.results.length,
-          order_by: 'newest', // section endpoint always returns newest first
-          results: r.results.map((raw) => normalizeArticle(raw)),
-        };
-      },
-      {
-        operation: 'GuardianService.getSectionContent',
-        context: ctx,
-        baseDelayMs: 500,
-        signal: ctx.signal,
-      },
-    ).catch((err) => annotateHttpError(err, { notFoundReason: 'section_not_found' }));
+    const data = RawSectionContentResponseSchema.safeParse(
+      parseLookupJson(text, 'section_not_found'),
+    );
+    if (!data.success) throw lookupMiss('section_not_found');
+    const r = data.data.response;
+    return {
+      total: r.total,
+      page: r.currentPage,
+      pages: r.pages,
+      page_size: r.results.length,
+      order_by: 'newest',
+      results: r.results.map((raw) => normalizeArticle(raw, includeBody ? 'preview' : 'omit')),
+    };
   }
 
   /** Fetch all Guardian sections, optionally filtering by query. */
@@ -394,9 +569,7 @@ export class GuardianService {
 
     return withRetry(
       async () => {
-        const response = await fetchWithTimeout(url, TIMEOUT_MS, ctx, { signal: ctx.signal });
-        const text = await response.text();
-        assertNotHtmlPage(text);
+        const text = await fetchGuardianText(url, ctx);
         const data = JSON.parse(text) as RawSectionsResponse;
         const r = data.response;
 
@@ -438,9 +611,7 @@ export class GuardianService {
 
     return withRetry(
       async () => {
-        const response = await fetchWithTimeout(url, TIMEOUT_MS, ctx, { signal: ctx.signal });
-        const text = await response.text();
-        assertNotHtmlPage(text);
+        const text = await fetchGuardianText(url, ctx);
         const data = JSON.parse(text) as RawTagsResponse;
         const r = data.response;
 
@@ -466,7 +637,12 @@ export class GuardianService {
         baseDelayMs: 500,
         signal: ctx.signal,
       },
-    ).catch((err) => annotateHttpError(err));
+    ).catch((err) =>
+      annotateHttpError(err, {
+        badRequestHint:
+          'Use an earlier page or narrow by query, tag_type, or section_id. Guardian can reject paging past 38,000 results even within the reported page count.',
+      }),
+    );
   }
 }
 

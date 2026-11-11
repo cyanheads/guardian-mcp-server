@@ -70,7 +70,20 @@ describe('GuardianService', () => {
       const body = `<p>${Array.from({ length: 2100 }, (_, i) => `word${i}`).join(' ')} ending</p>`;
       vi.mocked(fetchWithTimeout).mockResolvedValueOnce(
         makeResponse(
-          JSON.stringify({ response: { content: { id: 'world/test', fields: { body } } } }),
+          JSON.stringify({
+            response: {
+              status: 'ok',
+              content: {
+                id: 'world/test',
+                type: 'article',
+                sectionId: 'world',
+                sectionName: 'World',
+                webPublicationDate: '2024-01-01T00:00:00Z',
+                webUrl: 'https://www.theguardian.com/world/test',
+                fields: { body },
+              },
+            },
+          }),
         ),
       );
       const article = await svc.getContent('world/test', createMockContext());

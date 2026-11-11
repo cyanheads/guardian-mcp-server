@@ -42,6 +42,7 @@ const sampleArticle = {
   body: 'The full article body text goes here and continues with interesting content.',
   truncated: false,
   contributors: [{ id: 'profile/john-smith', name: 'John Smith' }],
+  tags: [],
   pillar_id: 'pillar/news',
   pillar_name: 'News',
 };

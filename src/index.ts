@@ -16,14 +16,11 @@ await createApp({
   title: 'guardian-mcp-server',
   sessionMode: 'stateless',
   tools: [guardianSearchArticles, guardianGetArticle, guardianBrowseContent],
+  skills: 'skills',
   resources: [],
   prompts: [],
   instructions:
-    "Guardian Open Platform MCP server. Provides full article text — not just headlines — from The Guardian's archive (1999–present). " +
-    'GUARDIAN_API_KEY is required (free non-commercial key at open-platform.theguardian.com). ' +
-    'Typical workflows: guardian_search_articles for archive search → guardian_get_article for full text; guardian_browse_content mode=list_sections or list_tags to discover valid filter IDs. ' +
-    'Search and browse return 2,000-word previews; guardian_get_article returns complete text using article_id. ' +
-    'Rate limits: 5,000 requests/day, 12 calls/sec (free tier). Powered by The Guardian.',
+    "Search The Guardian's archive with guardian_search_articles or discover filter IDs with guardian_browse_content in list_sections or list_tags mode. Use guardian_get_article with a result's exact ID or Guardian article URL for the complete available text. GUARDIAN_API_KEY is required. The free key is for non-commercial use. Pace requests to the configured key's limits. Powered by The Guardian.",
 
   setup(core) {
     getServerConfig();

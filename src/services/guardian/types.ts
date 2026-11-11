@@ -4,19 +4,11 @@
  * @module services/guardian/types
  */
 
+import { z } from '@cyanheads/mcp-ts-core';
+
 // ---------------------------------------------------------------------------
 // Raw wire types — field names match the Guardian API response exactly
 // ---------------------------------------------------------------------------
-
-/** Raw show-fields sub-object nested under each result item. */
-export interface RawFields {
-  body?: string;
-  byline?: string;
-  headline?: string;
-  standfirst?: string;
-  thumbnail?: string;
-  wordcount?: string; // API returns as string integer
-}
 
 /** Raw tag object (used for contributors and tag search results). */
 export interface RawTag {
@@ -29,23 +21,55 @@ export interface RawTag {
   webUrl: string;
 }
 
-/** Raw content item from search / section browse results. */
-export interface RawContentItem {
-  apiUrl: string;
-  fields?: RawFields;
-  id: string;
-  pillarId?: string;
-  pillarName?: string;
-  sectionId: string;
-  sectionName: string;
-  tags?: RawTag[];
-  type: string;
-  webPublicationDate: string;
-  webUrl: string;
-}
+/** Article fields consumed by normalization. Discovery uses its own wire types. */
+const RawContentItemSchema = z.object({
+  id: z.string().min(1),
+  type: z.string().min(1),
+  sectionId: z.string(),
+  sectionName: z.string(),
+  webPublicationDate: z.string(),
+  webUrl: z.string(),
+  pillarId: z.string().optional(),
+  pillarName: z.string().optional(),
+  fields: z
+    .object({
+      body: z.string().optional(),
+      byline: z.string().optional(),
+      headline: z.string().optional(),
+      standfirst: z.string().optional(),
+      thumbnail: z.string().optional(),
+      wordcount: z.string().optional(),
+      firstPublicationDate: z.string().nullish(),
+      lastModified: z.string().nullish(),
+    })
+    .optional(),
+  tags: z.array(z.object({ id: z.string(), type: z.string(), webTitle: z.string() })).optional(),
+});
 
-/** Raw single-content response (single-item endpoint returns response.content, not response.results[]). */
-export type RawSingleContent = RawContentItem;
+export type RawContentItem = z.infer<typeof RawContentItemSchema>;
+
+/** The Guardian single-item endpoint can serve either an article or a collection. */
+export const RawSingleResponseSchema = z.object({
+  response: z.object({ status: z.literal('ok'), content: RawContentItemSchema }),
+});
+
+const CollectionMarkerSchema = z.object({ id: z.string().min(1) });
+
+/** A collection has its own marker and an article array, even on an empty page. */
+export const RawSectionContentResponseSchema = z.object({
+  response: z
+    .object({
+      status: z.literal('ok'),
+      total: z.number().int().nonnegative(),
+      currentPage: z.number().int().positive(),
+      pages: z.number().int().nonnegative(),
+      results: z.array(RawContentItemSchema),
+      section: CollectionMarkerSchema.optional(),
+      edition: CollectionMarkerSchema.optional(),
+      tag: CollectionMarkerSchema.optional(),
+    })
+    .refine(({ section, edition, tag }) => section || edition || tag),
+});
 
 /** Raw search / section response envelope. */
 export interface RawSearchResponse {
@@ -58,14 +82,6 @@ export interface RawSearchResponse {
     pages: number;
     orderBy?: string;
     results: RawContentItem[];
-  };
-}
-
-/** Raw single-item response envelope. */
-export interface RawSingleResponse {
-  response: {
-    status: string;
-    content: RawSingleContent;
   };
 }
 
@@ -126,6 +142,15 @@ export interface NormalizedArticle {
   type: string;
   web_url: string;
   word_count?: number;
+}
+
+/** Topic and editorial tags returned by article detail. */
+export const ArticleTagTypeSchema = z.enum(['keyword', 'series', 'tone']);
+
+export interface NormalizedArticleDetail extends NormalizedArticle {
+  first_published_date?: string;
+  last_modified?: string;
+  tags: Array<Contributor & { type: z.infer<typeof ArticleTagTypeSchema> }>;
 }
 
 export interface NormalizedSection {

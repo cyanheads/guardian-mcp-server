@@ -1,12 +1,17 @@
 /**
  * @fileoverview guardian_search_articles tool — full-text search across The Guardian's archive with
- * optional section, tag, contributor, and date filters. Returns articles with full body text.
+ * optional section, tag, contributor, and date filters. Returns optional article body previews.
  * Powered by The Guardian.
  * @module mcp-server/tools/definitions/guardian-search-articles
  */
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import {
+  escapeMarkdownInline as literal,
+  markdownImage,
+  markdownLink,
+} from '@cyanheads/mcp-ts-core/utils';
 import { getGuardianService } from '@/services/guardian/guardian-service.js';
 
 /** Validate calendar dates without timezone normalization. */
@@ -45,8 +50,7 @@ const ArticleSchema = z.object({
     .string()
     .optional()
     .describe(
-      'Full article body text (HTML stripped). Truncated at 2,000 words with a note if longer. ' +
-        'Use guardian_get_article with this id as article_id for the complete text.',
+      'Article body preview (HTML stripped), up to 2,000 words with a note when truncated. Omitted when include_body is false or Guardian supplies no body text. Use guardian_get_article with this id as article_id for the complete text.',
     ),
   contributors: z
     .array(
@@ -68,18 +72,14 @@ const ArticleSchema = z.object({
 export const guardianSearchArticles = tool('guardian_search_articles', {
   title: 'Search Guardian Articles',
   description:
-    "Full-text search across The Guardian's archive (1999–present) with optional section, tag, " +
-    'contributor, and date filters. Returns articles with full body text (HTML stripped, truncated ' +
-    'at 2,000 words). Use guardian_browse_content with mode=list_sections or mode=list_tags to discover ' +
-    'valid filter IDs before searching. Powered by The Guardian (open-platform.theguardian.com).',
+    "Full-text search across The Guardian's archive (1999–present) with optional section, tag, contributor, and date filters. Returns body previews up to 2,000 words by default. Use guardian_browse_content with mode=list_sections or mode=list_tags to discover filter IDs. Powered by The Guardian (open-platform.theguardian.com).",
   annotations: { readOnlyHint: true },
 
   input: z.object({
     query: z
       .string()
       .describe(
-        'Full-text search query. Supports AND, OR, NOT operators and exact phrases in double quotes. ' +
-          'Example: "climate change" AND (policy OR legislation)',
+        'Full-text search query. Pass an empty string to search by filters alone. Supports AND, OR, NOT operators and exact phrases in double quotes, e.g. "climate change" AND (policy OR legislation).',
       ),
     section: z
       .string()
@@ -97,15 +97,13 @@ export const guardianSearchArticles = tool('guardian_search_articles', {
           '"technology/artificial-intelligence", "world/ukraine"). Supports comma (AND), pipe | (OR), ' +
           'hyphen - (NOT), and parentheses. OR example: environment/climate-crisis|environment/flooding. ' +
           'When combining with contributor, group compound expressions: (environment/climate-crisis|environment/flooding). ' +
-          'The service comma-joins tag and contributor unchanged. Use guardian_browse_content with mode=list_tags to discover valid tag IDs.',
+          'The service comma-joins tag and the contributor filter. Use guardian_browse_content with mode=list_tags to discover valid tag IDs.',
       ),
     contributor: z
       .string()
       .optional()
       .describe(
-        'Restrict to articles by this contributor tag ID (e.g. "profile/georgemonbiot"). ' +
-          'Contributor IDs follow the pattern "profile/<slug>". Use guardian_browse_content with ' +
-          'mode=list_tags and tag_type=contributor to discover contributor IDs.',
+        'Restrict to articles by a contributor tag ID (e.g. "profile/georgemonbiot"). Bare slugs receive the profile/ prefix. Boolean tag expressions pass through unchanged. Use guardian_browse_content with mode=list_tags and tag_type=contributor to discover IDs.',
       ),
     from_date: z
       .string()
@@ -123,8 +121,7 @@ export const guardianSearchArticles = tool('guardian_search_articles', {
       .enum(['newest', 'oldest', 'relevance'])
       .default('relevance')
       .describe(
-        'Sort order. "relevance" ranks by match strength (default when a query is provided). ' +
-          '"newest" and "oldest" sort by publication date.',
+        'Sort order. "relevance" is the default for a nonblank query and falls back to "newest" without one. "newest" and "oldest" sort by publication date.',
       ),
     page: z
       .number()
@@ -139,8 +136,13 @@ export const guardianSearchArticles = tool('guardian_search_articles', {
       .max(50)
       .default(10)
       .describe(
-        'Number of results per page (1–50). Keep low (≤10) when requesting full body text to ' +
-          'manage context size. Large bodies can be 10–30KB each.',
+        'Number of results per page (1–50). Set include_body to false to scan larger pages without article text.',
+      ),
+    include_body: z
+      .boolean()
+      .default(true)
+      .describe(
+        'Include body previews up to 2,000 words per article. Set false for metadata only. Use guardian_get_article for complete text.',
       ),
   }),
 
@@ -164,9 +166,7 @@ export const guardianSearchArticles = tool('guardian_search_articles', {
     notice: z
       .string()
       .optional()
-      .describe(
-        'Guidance when the search returned zero results — echoes the query and suggests how to broaden.',
-      ),
+      .describe('Explains why a blank query uses newest instead of relevance.'),
   },
 
   errors: [
@@ -187,14 +187,16 @@ export const guardianSearchArticles = tool('guardian_search_articles', {
     {
       reason: 'invalid_date',
       code: JsonRpcErrorCode.ValidationError,
-      when: 'from_date or to_date is not a real calendar date in YYYY-MM-DD format.',
-      recovery: 'Provide real calendar dates in YYYY-MM-DD format, e.g. "2024-01-15".',
+      when: 'A date is invalid or from_date is later than to_date.',
+      recovery:
+        'Provide real calendar dates in YYYY-MM-DD format with from_date on or before to_date.',
     },
     {
       reason: 'request_rejected',
       code: JsonRpcErrorCode.InvalidParams,
       when: 'The Guardian API returned HTTP 400.',
-      recovery: 'Check the search parameters and use a page within the available range.',
+      recovery:
+        'Use an earlier page or narrow from_date and to_date. Guardian can reject paging past 38,000 results even within the reported page count.',
       retryable: false,
       thrownBy: 'service',
     },
@@ -283,6 +285,12 @@ export const guardianSearchArticles = tool('guardian_search_articles', {
     if (input.to_date && !isCalendarDate(input.to_date)) {
       throw ctx.fail('invalid_date', `Invalid to_date "${input.to_date}". Expected YYYY-MM-DD.`);
     }
+    if (input.from_date && input.to_date && input.from_date > input.to_date) {
+      throw ctx.fail(
+        'invalid_date',
+        `from_date "${input.from_date}" is later than to_date "${input.to_date}".`,
+      );
+    }
 
     ctx.log.info('Searching Guardian archive', {
       query: input.query,
@@ -307,17 +315,33 @@ export const guardianSearchArticles = tool('guardian_search_articles', {
         order_by: input.order_by,
         page: input.page,
         page_size: input.page_size,
+        include_body: input.include_body,
       },
       ctx,
     );
 
     if (result.total === 0) {
-      ctx.enrich.notice(
-        `No articles matched "${input.query}". Try broader terms, remove section/tag filters, or adjust the date range.`,
+      const filters = Object.entries({
+        query: input.query,
+        section: input.section,
+        tag: input.tag,
+        contributor: input.contributor,
+        from_date: input.from_date,
+        to_date: input.to_date,
+      }).flatMap(([key, value]) => (value?.trim() ? [`${key} "${value}"`] : []));
+      throw ctx.fail(
+        'no_results',
+        filters.length
+          ? `No articles matched ${filters.join(', ')}.`
+          : 'No articles were returned.',
       );
-      throw ctx.fail('no_results', `No articles matched "${input.query}".`);
     }
 
+    if (!input.query.trim() && input.order_by === 'relevance') {
+      ctx.enrich.notice(
+        'Sorted by newest because the query is blank and relevance requires search terms.',
+      );
+    }
     ctx.enrich.total(result.total);
     return result;
   },
@@ -329,30 +353,26 @@ export const guardianSearchArticles = tool('guardian_search_articles', {
     ];
 
     for (const article of result.results) {
-      lines.push(`## ${article.headline || article.id}`);
+      lines.push(`## ${literal(article.headline || article.id).replaceAll('\\\n', '&#10;')}`);
       lines.push(
-        `**ID:** ${article.id} | **Type:** ${article.type} | **Section:** ${article.section_name} (${article.section_id}) | **Published:** ${article.published_date}`,
+        `**ID:** ${literal(article.id)} | **Type:** ${literal(article.type)} | **Section:** ${literal(article.section_name)} (${literal(article.section_id)}) | **Published:** ${literal(article.published_date)}`,
       );
-      if (article.byline) lines.push(`**By:** ${article.byline}`);
-      if (article.standfirst) lines.push(`*${article.standfirst}*`);
+      if (article.byline !== undefined) lines.push(`**By:** ${literal(article.byline)}`);
+      if (article.standfirst !== undefined)
+        lines.push(`**Standfirst:** ${literal(article.standfirst)}`);
       if (article.word_count != null) lines.push(`**Word count:** ${article.word_count}`);
-      if (article.thumbnail) lines.push(`**Thumbnail:** ${article.thumbnail}`);
+      if (article.thumbnail !== undefined)
+        lines.push(`**Thumbnail:** ${markdownImage('Article thumbnail', article.thumbnail)}`);
       if (article.contributors.length > 0) {
-        const contribs = article.contributors.map((c) => `${c.name} (${c.id})`).join(', ');
+        const contribs = article.contributors
+          .map((c) => `${literal(c.name)} (${literal(c.id)})`)
+          .join(', ');
         lines.push(`**Contributors:** ${contribs}`);
       }
-      lines.push(`**URL:** ${article.web_url}`);
+      lines.push(`**URL:** ${markdownLink(article.web_url, article.web_url)}`);
       lines.push(`**Truncated:** ${article.truncated}`);
-      if (article.body) {
-        lines.push('');
-        lines.push(article.body);
-        if (article.truncated) {
-          lines.push(
-            `\n*(Body truncated — use guardian_get_article with article_id "${article.id}" for full text)*`,
-          );
-        }
-      } else {
-        lines.push('*(Body not available for this content type)*');
+      if (article.body !== undefined) {
+        lines.push('', literal(article.body));
       }
       lines.push('');
     }

@@ -7,6 +7,11 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import {
+  escapeMarkdownInline as literal,
+  markdownImage,
+  markdownLink,
+} from '@cyanheads/mcp-ts-core/utils';
 import { getGuardianService } from '@/services/guardian/guardian-service.js';
 import type { NormalizedArticle } from '@/services/guardian/types.js';
 
@@ -35,7 +40,7 @@ const ArticleBrowseSchema = z.object({
     .string()
     .optional()
     .describe(
-      'Article body text (HTML stripped). Truncated at 2,000 words. Absent on galleries, live blogs, and interactives.',
+      'Article body preview (HTML stripped), up to 2,000 words. Omitted when include_body is false or Guardian supplies no body text.',
     ),
   truncated: z.boolean().describe('True when body was truncated at 2,000 words.'),
 });
@@ -141,7 +146,7 @@ export const guardianBrowseContent = tool('guardian_browse_content', {
     'for use as filters. Four modes: "section_latest" returns the newest articles from a section ' +
     '(requires section_id); "tag_latest" returns newest articles carrying a tag (requires tag_id); ' +
     '"list_sections" returns all Guardian sections for use as section filters; "list_tags" searches ' +
-    'the tag taxonomy (optional: query, tag_type). Start with list_sections or list_tags when you ' +
+    'the tag taxonomy (optional: query, tag_type, section_id). Start with list_sections or list_tags when you ' +
     "don't know valid section/tag IDs. Powered by The Guardian (open-platform.theguardian.com).",
   annotations: { readOnlyHint: true },
 
@@ -153,15 +158,13 @@ export const guardianBrowseContent = tool('guardian_browse_content', {
           '"section_latest": newest articles from a section (requires section_id). ' +
           '"tag_latest": newest articles carrying a tag (requires tag_id). ' +
           '"list_sections": return all Guardian sections for use as section filters. ' +
-          '"list_tags": search the tag taxonomy (optional: query, tag_type, section).',
+          '"list_tags": search the tag taxonomy (optional: query, tag_type, section_id).',
       ),
     section_id: z
       .string()
       .optional()
       .describe(
-        'Section ID for section_latest mode (e.g. "world", "politics", "science", "environment", ' +
-          '"technology", "culture", "sport", "lifeandstyle"). Required for section_latest. ' +
-          'Use list_sections first if unsure of valid IDs.',
+        'Required for section_latest. In list_tags, optionally limit tags to this section. Use list_sections to discover section IDs such as "environment".',
       ),
     tag_id: z
       .string()
@@ -206,15 +209,22 @@ export const guardianBrowseContent = tool('guardian_browse_content', {
       .max(50)
       .default(10)
       .describe(
-        'Number of results per page (1–50). Applies to all modes. ' +
-          'For article-returning modes (section_latest, tag_latest), keep ≤10 to manage context size.',
+        'Number of results per page (1–50). list_sections ignores this input. Set include_body to false to scan larger article pages without body text.',
+      ),
+    include_body: z
+      .boolean()
+      .default(true)
+      .describe(
+        'Include body previews up to 2,000 words in section_latest and tag_latest. Set false for metadata only. Discovery modes ignore this input.',
       ),
     page: z
       .number()
       .int()
       .min(1)
       .default(1)
-      .describe('Page number (1-indexed). Use with total/pages in the response to paginate.'),
+      .describe(
+        'Page number (1-indexed). Use with total/pages in the response to paginate. list_sections ignores this input.',
+      ),
   }),
 
   output: OutputSchema,
@@ -266,7 +276,8 @@ export const guardianBrowseContent = tool('guardian_browse_content', {
       reason: 'request_rejected',
       code: JsonRpcErrorCode.InvalidParams,
       when: 'The Guardian API returned HTTP 400.',
-      recovery: 'Check the search parameters and use a page within the available range.',
+      recovery:
+        'Use an earlier page or narrow the section or tag. For list_tags, narrow query, tag_type, or section_id. Guardian can reject paging past 38,000 results even within the reported page count.',
       retryable: false,
       thrownBy: 'service',
     },
@@ -355,7 +366,7 @@ export const guardianBrowseContent = tool('guardian_browse_content', {
         ctx.log.info('Browsing section latest', { section_id: input.section_id });
         const result = await svc.getSectionContent(
           input.section_id,
-          { page: input.page, page_size: input.page_size },
+          { page: input.page, page_size: input.page_size, include_body: input.include_body },
           ctx,
         );
         if (result.total === 0) {
@@ -386,6 +397,7 @@ export const guardianBrowseContent = tool('guardian_browse_content', {
             order_by: 'newest',
             page: input.page,
             page_size: input.page_size,
+            include_body: input.include_body,
           },
           ctx,
         );
@@ -421,11 +433,13 @@ export const guardianBrowseContent = tool('guardian_browse_content', {
         const tagsParams: {
           query?: string;
           tag_type?: string;
+          section?: string;
           page?: number;
           page_size?: number;
         } = { page: input.page, page_size: input.page_size };
         if (input.query !== undefined) tagsParams.query = input.query;
         if (input.tag_type !== undefined) tagsParams.tag_type = input.tag_type;
+        if (input.section_id !== undefined) tagsParams.section = input.section_id;
         const result = await svc.getTags(tagsParams, ctx);
         ctx.enrich.total(result.total);
         return {
@@ -452,24 +466,20 @@ export const guardianBrowseContent = tool('guardian_browse_content', {
     // Articles (section_latest / tag_latest)
     if (result.results != null) {
       for (const article of result.results) {
-        lines.push(`## ${article.headline || article.id}`);
+        lines.push(`## ${literal(article.headline || article.id).replaceAll('\\\n', '&#10;')}`);
         lines.push(
-          `**id:** ${article.id} | **section:** ${article.section_name} (${article.section_id}) | **published:** ${article.published_date}`,
+          `**id:** ${literal(article.id)} | **section:** ${literal(article.section_name)} (${literal(article.section_id)}) | **published:** ${literal(article.published_date)}`,
         );
-        if (article.byline) lines.push(`**by:** ${article.byline}`);
-        if (article.standfirst) lines.push(`*${article.standfirst}*`);
+        if (article.byline !== undefined) lines.push(`**by:** ${literal(article.byline)}`);
+        if (article.standfirst !== undefined)
+          lines.push(`**standfirst:** ${literal(article.standfirst)}`);
         if (article.word_count != null) lines.push(`**words:** ${article.word_count}`);
-        lines.push(`**url:** ${article.web_url}`);
+        lines.push(`**url:** ${markdownLink(article.web_url, article.web_url)}`);
         lines.push(`**truncated:** ${article.truncated}`);
-        if (article.thumbnail) lines.push(`**thumbnail:** ${article.thumbnail}`);
-        if (article.body) {
-          lines.push('');
-          lines.push(article.body);
-          if (article.truncated) {
-            lines.push(
-              `*(truncated — use guardian_get_article with article_id "${article.id}" for full text)*`,
-            );
-          }
+        if (article.thumbnail !== undefined)
+          lines.push(`**thumbnail:** ${markdownImage('Article thumbnail', article.thumbnail)}`);
+        if (article.body !== undefined) {
+          lines.push('', literal(article.body));
         }
         lines.push('');
       }
@@ -478,7 +488,9 @@ export const guardianBrowseContent = tool('guardian_browse_content', {
     // Sections (list_sections)
     if (result.sections != null) {
       for (const section of result.sections) {
-        lines.push(`- **${section.name}** — id: \`${section.id}\` | ${section.web_url}`);
+        lines.push(
+          `- ${literal(section.name)} — id: ${literal(section.id)} | ${markdownLink(section.web_url, section.web_url)}`,
+        );
       }
     }
 
@@ -487,14 +499,14 @@ export const guardianBrowseContent = tool('guardian_browse_content', {
       for (const tag of result.tags) {
         const sectionPart =
           tag.section_id != null && tag.section_name != null
-            ? ` | section: ${tag.section_name} (${tag.section_id})`
+            ? ` | section: ${literal(tag.section_name)} (${literal(tag.section_id)})`
             : tag.section_id != null
-              ? ` | section_id: ${tag.section_id}`
+              ? ` | section_id: ${literal(tag.section_id)}`
               : tag.section_name != null
-                ? ` | section: ${tag.section_name}`
+                ? ` | section: ${literal(tag.section_name)}`
                 : '';
         lines.push(
-          `- **${tag.name}** — id: \`${tag.id}\` | type: ${tag.type}${sectionPart} | ${tag.web_url}`,
+          `- ${literal(tag.name)} — id: ${literal(tag.id)} | type: ${literal(tag.type)}${sectionPart} | ${markdownLink(tag.web_url, tag.web_url)}`,
         );
       }
     }

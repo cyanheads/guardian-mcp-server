@@ -295,11 +295,17 @@ describe('guardianBrowseContent', () => {
         guardianBrowseContent.format!({
           mode: 'tag_latest',
           total: 1,
-          results: [{ ...sampleArticle, body: 'Body.', truncated }],
+          results: [
+            {
+              ...sampleArticle,
+              body: truncated ? 'Body.\n\n[Use guardian_get_article to continue.]' : 'Body.',
+              truncated,
+            },
+          ],
         }),
       );
       expect(text).toContain(`**truncated:** ${truncated}`);
-      if (truncated) expect(text).toContain(`article_id "${sampleArticle.id}"`);
+      expect(text.match(/guardian_get_article/g) ?? []).toHaveLength(truncated ? 1 : 0);
     });
     it('renders section_latest results', async () => {
       mockService.getSectionContent.mockResolvedValueOnce(sampleSearchResult);

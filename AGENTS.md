@@ -2,9 +2,9 @@
 
 **Server:** @cyanheads/guardian-mcp-server
 **Version:** 0.2.0
-**Framework:** [@cyanheads/mcp-ts-core](https://www.npmjs.com/package/@cyanheads/mcp-ts-core) `^0.13.15`
-**Engines:** Bun ≥1.4.0, Node ≥24.0.0
-**MCP SDK:** `@modelcontextprotocol/server` ^2.3.1
+**Framework:** [@cyanheads/mcp-ts-core](https://www.npmjs.com/package/@cyanheads/mcp-ts-core) `^0.13.22`
+**Engines:** Bun ≥1.4.4, Node ≥24.0.0
+**MCP SDK:** `@modelcontextprotocol/server` ^2.4.0
 **Zod:** ^4.6.7
 
 > **Read the framework docs first:** `node_modules/@cyanheads/mcp-ts-core/CLAUDE.md` contains the full API reference — builders, Context, error codes, exports, patterns. This file covers server-specific conventions only.
@@ -219,9 +219,9 @@ Handlers throw — the framework catches, classifies, and formats.
 
 **Recommended: typed error contract.** Declare `errors: [{ reason, code, when, recovery, retryable?, severity?, thrownBy? }]` on `tool()` / `resource()` to receive `ctx.fail(reason, …)` typed against the reason union. TypeScript catches typos at compile time, `data.reason` is auto-populated for observability, linter enforces conformance against the handler body. `recovery` is required (≥ 5 words, lint-validated) — the single source of truth for the agent's next move. The framework puts it on the wire whenever a failure carrying that `reason` arrives without a hint — a bare `ctx.fail('reason')` or a service throw with `data: { reason }` — as `data.recovery.hint`, mirrored into `content[]` text unless the message already contains it verbatim; override with an explicit `{ recovery: { hint: '...' } }` when dynamic runtime context matters. Every error envelope also carries `data.requestId`, the id the server's log records for that call carry, and `content[]` closes with `(reason … · request <id>)`. Mark an entry the service layer throws with `thrownBy: 'service'` so `error-contract-unthrown` skips it — lint-only metadata, nothing at runtime reads it. Baseline codes (`InternalError`, `ServiceUnavailable`, `Timeout`, `ValidationError`, `SerializationError`, `RequestCancelled`) bubble freely and don't need declaring.
 
-In this server, `GuardianService`'s `annotateHttpError` preserves HTTP-specific codes and emits authored Guardian messages with canonical `status`/`body` diagnostics and explicit retryability. Deterministic failures carry parameter/configuration recovery; 408/425/429 and retryable 5xx retain transient guidance, while 501 is nonretryable. The tool contracts declare each service reason inline with `thrownBy: 'service'`; contracts fill recovery only, not retryability. Article and section 404 retain `not_found` and `section_not_found`. A reason the handler throws itself with a literal `ctx.fail('<reason>'` stays unmarked.
+In this server, `GuardianService`'s `annotateHttpError` preserves HTTP-specific codes and emits authored Guardian messages with canonical `status` diagnostics and explicit retryability. Redacted upstream bodies stay in server diagnostics. Deterministic failures carry parameter/configuration recovery; 408/425/429 and retryable 5xx retain transient guidance, while 501 is nonretryable. The tool contracts declare each service reason inline with `thrownBy: 'service'`; contracts fill recovery only, not retryability. Article and section 404 retain `not_found` and `section_not_found`. A reason the handler throws itself with a literal `ctx.fail('<reason>'` stays unmarked.
 
-Search and article-returning browse modes cap bodies at 2,000 words and render each article's explicit `truncated` state. `guardian_get_article` accepts `article_id` and returns complete HTML-stripped text without a word cap. Calendar-date bounds are validated locally; tag boolean expressions pass through unchanged and are comma-joined with contributor filters.
+Search and article-returning browse modes default to 2,000-word body previews with one continuation and an explicit `truncated` state. With `include_body: false`, omit body fields from the upstream request and both tool result surfaces. `guardian_get_article` accepts a Guardian ID or web URL and returns complete available text, detail tags, and optional first-publication and modification dates. Validate calendar bounds and their order locally. A blank query uses newest when relevance was requested, with a notice. Preserve boolean tag expressions and prefix bare contributor slugs with `profile/` before joining the filters.
 
 ```ts
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
@@ -289,7 +289,7 @@ src/
 
 ## Skills
 
-Skills are modular instructions in `framework-skills/` at the project root. Read them directly when a task matches — e.g., `framework-skills/add-tool/SKILL.md` when adding a tool. `bun run list-skills` prints the full registry. The directory is deliberately not `skills/`: Claude Code and Codex auto-load a plugin's root `skills/`, so a server that ships `.claude-plugin/` or `.codex-plugin/` would hand these development skills to every agent that installs it. Keep `skills/` free for skills meant for those agents.
+Development skills live in `framework-skills/`. Read them directly when a task matches, for example `framework-skills/add-tool/SKILL.md` when adding a tool. `bun run list-skills` prints the full registry. Root `skills/` is reserved for published guidance for agents calling the server's tools. The `add-skill` skill covers authoring, packaging, and serving that guidance with `createApp({ skills: 'skills' })`.
 
 **Agent skill directory:** Copy skills into the directory your agent discovers (Claude Code: `.claude/skills/`, others: equivalent). Skills then load as context without referencing `framework-skills/` paths. After framework updates, run the `maintenance` skill — Phase B re-syncs the agent directory.
 
@@ -305,6 +305,7 @@ Available skills:
 | `add-prompt` | Scaffold a new prompt definition |
 | `add-service` | Scaffold a new service integration |
 | `add-test` | Scaffold test file for a tool, resource, or service |
+| `add-skill` | Author and validate a skill the server publishes in root `skills/` |
 | `field-test` | Exercise tools/resources/prompts with real inputs, verify behavior, report issues |
 | `tool-defs-analysis` | Read-only audit of MCP definition language across the surface — voice, leaks, defaults, recovery hints, output descriptions |
 | `security-pass` | Audit server for MCP-flavored security gaps: output injection, scope blast radius, input sinks, tenant isolation |
@@ -350,7 +351,7 @@ When you complete a skill's checklist, check the boxes and add a completion time
 | `bun run audit:fix` | `bun audit fix` — upgrade vulnerable packages to the lowest safe version within existing ranges (`--dry-run` previews, `--latest` rewrites ranges). First response when `devcheck` flags a transitive advisory; then `bun update <name>`, then `bun dedupe` |
 | `bun run audit:refresh` | Delete `bun.lock` and reinstall. Last resort after `audit:fix`, `bun update <name>`, and `bun dedupe` — re-resolves every ranged dep (the framework pin included) and rewrites the lockfile as `lockfileVersion: 2` |
 | `bun run lint:mcp` | Run the MCP definition linter standalone (rule catalog: `api-linter` skill) |
-| `bun run lint:packaging` | Packaging surface checks — `server.json`/`manifest.json` env-var parity (run by devcheck) |
+| `bun run lint:packaging` | Check env-var parity, MCPB exclusions, plugin manifests, and published skills (run by devcheck) |
 | `bun run list-skills` | Print the skill registry |
 | `bun run tree` | Generate directory structure doc |
 | `bun run format` | Auto-fix formatting (safe fixes only) |
@@ -368,7 +369,7 @@ When you complete a skill's checklist, check the boxes and add a completion time
 
 ## Bundling
 
-`bun run bundle` produces a `.mcpb` extension bundle for one-click install in Claude Desktop. The pack step is followed by `scripts/clean-mcpb.ts`, which prunes dev dependencies (`mcpb clean`) and strips two classes of `node_modules/**` content that root-anchored `.mcpbignore` patterns cannot reach: dependency-shipped agent docs (`framework-skills/`, `skills/`, `.claude/`, `.agents/`, `SKILL.md`) and platform-specific native bindings, which would otherwise lock the bundle to the platform it was packed on. MCPB is stdio-only — HTTP and Docker deployments are unaffected. Consumers who don't need it can delete `manifest.json` and `.mcpbignore`; `lint:packaging` skips cleanly.
+`bun run bundle` produces a stdio `.mcpb` for one-click install in Claude Desktop. The packer reads `.mcpbignore`. Use root-anchored exclusions such as `/docs/` to keep a repo path out without affecting dependencies. Root `skills/` ships with the bundle when present. `scripts/clean-mcpb.ts` then prunes dev dependencies, dependency-shipped agent docs, platform-specific native bindings, node-gyp build intermediates, and framework build-only files. The cleaner preserves runtime modules such as the SDK's `dist/ext/skills/`.
 
 **Adding an env var requires both files:** `server.json` (registry discovery, `environmentVariables[]`) and `manifest.json` (bundle install UX, `mcp_config.env` + `user_config`). `lint:packaging` (run by `devcheck`) verifies the env var names match, that every `user_config` option is wired into `mcp_config.env` as `"X": "${user_config.X}"` (the host substitutes nothing else — `"${X}"` reaches the server as that literal string), and that an optional string option carries `"default": ""`.
 
@@ -435,6 +436,9 @@ import { getGuardianService } from '@/services/guardian/guardian-service.js';
 - [ ] If wrapping external API: tests include at least one sparse payload case with omitted upstream fields
 - [ ] Registered in `createApp()` arrays (directly or via barrel exports)
 - [ ] Tests use `createMockContext()` from `@cyanheads/mcp-ts-core/testing`
+- [ ] Root `plugin.json` and `mcp.json` follow Agent Plugins 1.0.0. The root stdio config carries fixed env values; the Codex overlay's `env_vars` forwards `GUARDIAN_API_KEY` through its `mcpServers` pointer.
+- [ ] New root development paths have anchored exclusions in `.mcpbignore`, and `bun run bundle` and `bun run lint:packaging` pass
+- [ ] Any published skill passes packaging lint and has its tool gates and identifier guidance field-tested
 - [ ] `.codex-plugin/plugin.json` populated — `name`, `version`, `description`, `repository`, `license` from `package.json`; `interface.displayName` = the unscoped repo name (never the npm scope — `lint:packaging` enforces this); `interface.shortDescription` from `package.json` description
 - [ ] `.codex-plugin/mcp.json` updated — server name key is the unscoped repo name; every user-supplied variable (API key, contact email, instance URL) is listed in `env_vars` so Codex forwards it from the user's environment. Never write `"KEY": ""` into `env` — an empty value replaces the user's exported key and is read as unset
 - [ ] `.claude-plugin/plugin.json` populated — `name`, `version`, `description`, `author`, `repository`, `license`, `keywords` from `package.json`; inline `mcpServers` entry keyed by the unscoped repo name. Every user-supplied variable is declared under `userConfig` (`type`, `title`, `description`; `sensitive: true` for keys and tokens; `required: true` or `default: ""`) and referenced from `env` as `"KEY": "${user_config.<option>}"` — mirror the `user_config` block in `manifest.json`. Never write `"KEY": ""` into `env`
